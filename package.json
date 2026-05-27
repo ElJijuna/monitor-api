@@ -1,0 +1,73 @@
+{
+  "name": "monitor-api",
+  "version": "0.1.0",
+  "description": "Lightweight, signal-based web app monitoring library. Captures FPS, memory, network, React renders, and custom events — zero dependencies beyond ssignal.",
+  "author": "ElJijuna <pilmee@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/ElJijuna/monitor-api#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ElJijuna/monitor-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ElJijuna/monitor-api/issues"
+  },
+  "keywords": [
+    "monitor",
+    "performance",
+    "fps",
+    "network",
+    "react",
+    "signal",
+    "ssignal",
+    "observability",
+    "web",
+    "devtools"
+  ],
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.cjs",
+      "types": "./dist/react/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "dependencies": {
+    "ssignal": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.4.0",
+    "tsup": "^8.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
