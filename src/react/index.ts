@@ -5,4 +5,4 @@ export {
   useNetwork,
   useReact,
   useEvents,
-} from './hooks'
+} from './hooks/index'
