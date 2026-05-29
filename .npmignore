@@ -1,6 +1,7 @@
 # Source and tests
 src/
 test/
+bench/
 docs/
 
 # Tooling config

@@ -46,6 +46,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "bench": "npm run build && node bench/monitor.bench.mjs",
     "build": "tsup",
     "docs:build": "typedoc",
     "dev": "tsup --watch",
