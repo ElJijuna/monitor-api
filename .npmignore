@@ -1,6 +1,20 @@
+# Source and tests
 src/
-*.config.ts
+test/
+
+# Tooling config
+.github/
+jest.config.cjs
+jest.transform.cjs
+release.config.cjs
 tsconfig.json
+tsconfig.test.json
+tsup.config.ts
+
+# Local/development files
+node_modules/
+*.tsbuildinfo
 .gitignore
+.npmignore
 .env
-.env.local
+.env.*
