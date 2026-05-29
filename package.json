@@ -1,6 +1,6 @@
 {
   "name": "monitor-api",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Lightweight, signal-based web app monitoring library. Captures FPS, memory, network, React renders, and custom events — zero dependencies beyond ssignal.",
   "author": "ElJijuna <pilmee@gmail.com>",
   "license": "MIT",
