@@ -3,6 +3,7 @@ import { PerformanceCollector } from '../collectors/PerformanceCollector'
 import { NetworkCollector } from '../collectors/NetworkCollector'
 import { ReactCollector } from '../collectors/ReactCollector'
 import { EventCollector } from '../collectors/EventCollector'
+import { WebVitalsCollector } from '../collectors/WebVitalsCollector'
 import type {
   Monitor,
   MonitorConfig,
@@ -12,6 +13,7 @@ import type {
   NetworkCollectorConfig,
   ReactCollectorConfig,
   EventCollectorConfig,
+  WebVitalsCollectorConfig,
 } from './types'
 
 function resolveCollector<T>(
@@ -34,7 +36,8 @@ function resolveCollector<T>(
 }
 
 /**
- * Creates a monitor instance with performance, network, React, and custom event collectors.
+ * Creates a monitor instance with performance, network, React, custom event,
+ * and Web Vitals collectors.
  *
  * The returned monitor is inert until {@link Monitor.start} is called. In non-browser
  * environments, browser-only collectors safely no-op when started.
@@ -60,25 +63,31 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   }
   const reactConfig: ReactCollectorConfig = { maxHistory, slowThreshold: 16 }
   const eventsConfig: EventCollectorConfig = { maxHistory }
+  const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true }
 
   const perfCfg = resolveCollector('performance', config, perfConfig)
   const netCfg = resolveCollector('network', config, netConfig)
   const reactCfg = resolveCollector('react', config, reactConfig)
   const eventsCfg = resolveCollector('events', config, eventsConfig)
+  const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig)
 
   const performance = perfCfg ? new PerformanceCollector(perfCfg) : new PerformanceCollector(perfConfig)
   const network = netCfg ? new NetworkCollector(netCfg) : new NetworkCollector(netConfig)
   const react = reactCfg ? new ReactCollector(reactCfg) : new ReactCollector(reactConfig)
   const events = eventsCfg ? new EventCollector(eventsCfg) : new EventCollector(eventsConfig)
+  const webVitals = webVitalsCfg
+    ? new WebVitalsCollector(webVitalsCfg)
+    : new WebVitalsCollector(webVitalsConfig)
 
   const signal = computed(
-    [performance.snapshot, network.snapshot, react.snapshot, events.snapshot],
-    ([perf, net, reactSnap, evts]): MonitorSnapshot => ({
+    [performance.snapshot, network.snapshot, react.snapshot, events.snapshot, webVitals.snapshot],
+    ([perf, net, reactSnap, evts, webVitalsSnap]): MonitorSnapshot => ({
       timestamp: Date.now(),
       performance: perf,
       network: net,
       react: reactSnap,
       events: evts,
+      webVitals: webVitalsSnap,
     }),
   )
 
@@ -87,6 +96,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network: netCfg !== false,
     react: reactCfg !== false,
     events: eventsCfg !== false,
+    webVitals: webVitalsCfg !== false,
   }
 
   let reporterInterval: ReturnType<typeof setInterval> | null = null
@@ -118,6 +128,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     if (active.network) network.start()
     if (active.react) react.start()
     if (active.events) events.start()
+    if (active.webVitals) webVitals.start()
     startReporter()
   }
 
@@ -126,6 +137,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network.stop()
     react.stop()
     events.stop()
+    webVitals.stop()
     stopReporter()
   }
 
@@ -135,6 +147,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network.destroy()
     react.destroy()
     events.destroy()
+    webVitals.destroy()
     signal.dispose()
   }
 
@@ -143,6 +156,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network,
     react,
     events,
+    webVitals,
     signal,
     getSnapshot: () => signal.value,
     subscribe: (cb) => signal.subscribe(cb),

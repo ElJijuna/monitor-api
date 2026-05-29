@@ -3,6 +3,7 @@ import type { PerformanceSnapshot, PerformanceCollectorConfig, IPerformanceColle
 import type { NetworkSnapshot, NetworkCollectorConfig, INetworkCollector } from './network'
 import type { ReactSnapshot, ReactCollectorConfig, IReactCollector } from './react'
 import type { EventSnapshot, EventCollectorConfig, IEventCollector } from './events'
+import type { WebVitalsSnapshot, WebVitalsCollectorConfig, IWebVitalsCollector } from './webVitals'
 
 /** Complete point-in-time state collected by a monitor instance. */
 export interface MonitorSnapshot {
@@ -16,6 +17,8 @@ export interface MonitorSnapshot {
   react: ReactSnapshot
   /** Custom application events emitted through the monitor event API. */
   events: EventSnapshot
+  /** Standard Web Vitals metrics collected from the browser. */
+  webVitals: WebVitalsSnapshot
 }
 
 /** Configuration for periodic production reporting. */
@@ -29,7 +32,7 @@ export interface ProductionReportConfig {
 }
 
 /** Built-in collector names accepted by {@link MonitorConfig.collectors}. */
-export type CollectorName = 'performance' | 'network' | 'react' | 'events'
+export type CollectorName = 'performance' | 'network' | 'react' | 'events' | 'webVitals'
 
 /** Options used when creating a monitor instance. */
 export interface MonitorConfig {
@@ -44,6 +47,7 @@ export interface MonitorConfig {
     network?: boolean | Partial<NetworkCollectorConfig>
     react?: boolean | Partial<ReactCollectorConfig>
     events?: boolean | Partial<EventCollectorConfig>
+    webVitals?: boolean | Partial<WebVitalsCollectorConfig>
   }
   /** Reserved for future sampling support. */
   sampleRate?: number
@@ -67,6 +71,8 @@ export interface Monitor {
   react: IReactCollector
   /** Custom event collector API. */
   events: IEventCollector
+  /** Web Vitals collector API. */
+  webVitals: IWebVitalsCollector
   /** Reactive signal containing the combined monitor snapshot. */
   signal: SSignal<MonitorSnapshot>
   /** Returns the latest combined snapshot synchronously. */

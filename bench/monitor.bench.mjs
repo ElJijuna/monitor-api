@@ -69,6 +69,55 @@ function withReactWindow() {
   globalThis.window = {}
 }
 
+function withWebVitalsBrowser() {
+  const noop = () => {}
+
+  globalThis.window = {
+    addEventListener: noop,
+    removeEventListener: noop,
+  }
+  globalThis.addEventListener = noop
+  globalThis.removeEventListener = noop
+  globalThis.document = {
+    prerendering: false,
+    visibilityState: 'visible',
+    readyState: 'complete',
+    addEventListener: noop,
+    removeEventListener: noop,
+  }
+  globalThis.PerformanceObserver = class PerformanceObserver {
+    static supportedEntryTypes = [
+      'event',
+      'layout-shift',
+      'largest-contentful-paint',
+      'navigation',
+      'paint',
+    ]
+
+    constructor(callback) {
+      this.callback = callback
+    }
+
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return []
+    }
+  }
+
+  if (!performance.getEntriesByType) {
+    performance.getEntriesByType = () => []
+  }
+}
+
+function resetWebVitalsBrowser() {
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'document')
+  Reflect.deleteProperty(globalThis, 'PerformanceObserver')
+  Reflect.deleteProperty(globalThis, 'addEventListener')
+  Reflect.deleteProperty(globalThis, 'removeEventListener')
+}
+
 function fiberFor(type, actualDuration = 1) {
   return {
     tag: 0,
@@ -115,6 +164,16 @@ function runBenchmarks() {
     emitMonitorEvent(`bench:${eventCount++ % 20}`, { index: eventCount })
   }))
   eventMonitor.destroy()
+
+  withWebVitalsBrowser()
+  results.push(bench('Web Vitals start + destroy', () => {
+    const monitor = createMonitor({
+      collectors: { webVitals: true },
+    })
+    monitor.start()
+    monitor.destroy()
+  }))
+  resetWebVitalsBrowser()
 
   withReactWindow()
   const reactMonitor = createMonitor({

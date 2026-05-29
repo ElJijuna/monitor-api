@@ -17,9 +17,10 @@ provide absolute performance guarantees. They run against the built package in
 
 | Benchmark | Throughput | Average time |
 | --- | ---: | ---: |
-| `createMonitor + destroy` | 12,559 ops/s | 79.62 us |
-| `emitMonitorEvent` | 71,957 ops/s | 13.9 us |
-| `React commit with 50 fibers` | 7,178 ops/s | 139 us |
+| `createMonitor + destroy` | 11,425 ops/s | 87.52 us |
+| `emitMonitorEvent` | 79,577 ops/s | 12.57 us |
+| `Web Vitals start + destroy` | 11,376 ops/s | 87.91 us |
+| `React commit with 50 fibers` | 5,863 ops/s | 171 us |
 
 ## Interpretation
 
@@ -33,10 +34,16 @@ benchmark includes browser-like `CustomEvent` dispatch through an `EventTarget`,
 so it measures the public event path rather than only the private collector
 method.
 
+`Web Vitals start + destroy` measures monitor integration overhead: creating a
+monitor with only the Web Vitals collector active, registering the `web-vitals`
+observers against minimal browser stubs, and destroying the monitor. It does not
+measure the browser's internal Web Vitals calculation cost, which is handled by
+the platform and the `web-vitals` package.
+
 `React commit with 50 fibers` is the most expensive benchmark, which is expected.
 The collector walks the Fiber tree, creates render entries, trims retained
 history, and derives per-component statistics from the retained entries. At
-roughly 139 us per 50-component commit in this synthetic run, the overhead is
+roughly 171 us per 50-component commit in this synthetic run, the overhead is
 reasonable for a runtime monitor.
 
 ## Potential Improvements
@@ -61,3 +68,8 @@ For event-heavy applications, a direct `monitor.events.emit(...)` path is alread
 available and avoids DOM event dispatch. `emitMonitorEvent(...)` should remain
 the ergonomic cross-tree API, while direct collector emission can be used in hot
 instrumentation paths.
+
+For Web Vitals, no optimization is currently needed. The collector registers the
+standard metric observers once and ignores future callbacks after `stop()`.
+Metric reports are low-frequency compared with network requests or React
+commits, so the current snapshot update path is not expected to be a hot path.

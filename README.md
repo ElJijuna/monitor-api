@@ -9,23 +9,24 @@
 [![GitHub stars](https://img.shields.io/github/stars/ElJijuna/monitor-api)](https://github.com/ElJijuna/monitor-api/stargazers)
 
 Lightweight, **signal-based** web app monitoring library.  
-Captures FPS, JS heap, long tasks, CLS, network requests, React renders, and custom events — all reactive via [ssignal](https://github.com/ElJijuna/ssignal).
+Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, and custom events — all reactive via [ssignal](https://github.com/ElJijuna/ssignal).
 
 ## Features
 
 - **Signal-based** — subscribe to exactly what you need, no polling
-- **4 collectors** — Performance, Network, React, Events
-- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`
+- **5 collectors** — Performance, Network, React, Events, Web Vitals
+- **Web Vitals** — CLS, FCP, INP, LCP, and TTFB via `web-vitals`
+- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useWebVitals`
 - **Zero config** — works out of the box, tree-shakeable
 - **SSR safe** — browser collectors no-op outside the browser
 - **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
 - **TypeScript-first** — fully typed, zero `any` in the public API
-- **Tiny** — depends only on [ssignal](https://www.npmjs.com/package/ssignal)
+- **Small runtime** — depends on [ssignal](https://www.npmjs.com/package/ssignal) and [web-vitals](https://www.npmjs.com/package/web-vitals)
 
 ## Installation
 
 ```sh
-npm install monitor-api ssignal
+npm install monitor-api
 ```
 
 ## Quick start
@@ -60,7 +61,7 @@ Creates and returns a `Monitor` instance. Does **not** start collecting — call
 import { createMonitor } from 'monitor-api'
 
 const monitor = createMonitor({
-  collectors: ['performance', 'network', 'react', 'events'], // default: all
+  collectors: ['performance', 'network', 'react', 'events', 'webVitals'], // default: all
   maxHistory: 120,       // data points kept per metric (default: 120)
   networkFilter: (url) => !url.includes('analytics'),        // optional
   env: 'development',    // 'development' | 'production' (default: 'development')
@@ -305,6 +306,52 @@ monitor.events.clearLog()
 
 ---
 
+### WebVitalsCollector
+
+Collects standard Web Vitals metrics using the
+[`web-vitals`](https://www.npmjs.com/package/web-vitals) package:
+
+- `CLS` — Cumulative Layout Shift
+- `FCP` — First Contentful Paint
+- `INP` — Interaction to Next Paint
+- `LCP` — Largest Contentful Paint
+- `TTFB` — Time to First Byte
+
+```ts
+monitor.start()
+
+monitor.webVitals.onMetric.subscribe((metric) => {
+  if (!metric) return
+  console.log(`[Web Vital] ${metric.name}: ${metric.value} (${metric.rating})`)
+})
+
+monitor.webVitals.snapshot.subscribe((snap) => {
+  console.log('Latest CLS:', snap.cls)
+  console.log('Latest INP:', snap.inp)
+  console.log('Recent Web Vitals reports:', snap.entries)
+})
+
+monitor.webVitals.clearLog()
+```
+
+**Metric shape:**
+
+```ts
+interface WebVitalMetric {
+  name: 'CLS' | 'FCP' | 'INP' | 'LCP' | 'TTFB'
+  value: number
+  delta: number
+  rating: 'good' | 'needs-improvement' | 'poor'
+  id: string
+  navigationType: string
+  timestamp: number
+}
+```
+
+`CLS` is unitless. `FCP`, `INP`, `LCP`, and `TTFB` are reported in milliseconds.
+
+---
+
 ## Unified snapshot
 
 Subscribe to all collectors at once:
@@ -314,6 +361,7 @@ monitor.subscribe((snap) => {
   console.log('Full monitor snapshot at', new Date(snap.timestamp).toISOString())
   console.log('  FPS:', snap.performance.fps)
   console.log('  Pending requests:', snap.network.entries.filter(e => !e.error).length)
+  console.log('  LCP:', snap.webVitals.lcp?.value ?? 'n/a')
   console.log('  React commits:', snap.react.totalCommits)
   console.log('  Custom events:', snap.events.entries.length)
 })
@@ -328,7 +376,7 @@ const snap = monitor.getSnapshot()
 
 ```tsx
 import { createMonitor } from 'monitor-api'
-import { useSignal, usePerformance, useNetwork, useReact, useEvents } from 'monitor-api/react'
+import { useSignal, usePerformance, useNetwork, useReact, useEvents, useWebVitals } from 'monitor-api/react'
 
 const monitor = createMonitor()
 monitor.start()
@@ -384,6 +432,17 @@ function ReactPanel() {
     </div>
   )
 }
+
+function WebVitalsPanel() {
+  const { cls, inp, lcp } = useWebVitals(monitor)
+  return (
+    <div>
+      <p>CLS: {cls?.value ?? 'n/a'}</p>
+      <p>INP: {inp ? `${inp.value}ms (${inp.rating})` : 'n/a'}</p>
+      <p>LCP: {lcp ? `${lcp.value}ms (${lcp.rating})` : 'n/a'}</p>
+    </div>
+  )
+}
 ```
 
 ---
@@ -401,6 +460,11 @@ const monitor = createMonitor({
       fps: snap.performance.fps,
       memory: snap.performance.memory?.percent ?? null,
       errorRate: snap.network.window5s.errorRate,
+      webVitals: {
+        cls: snap.webVitals.cls,
+        inp: snap.webVitals.inp,
+        lcp: snap.webVitals.lcp,
+      },
     }),
   },
 })
@@ -427,6 +491,7 @@ createMonitor({
     network: { filter: (url) => !url.includes('/analytics') },
     react: { slowThreshold: 8 },   // default 16ms
     events: false,                  // disabled
+    webVitals: { reportAllChanges: true },
   },
 
   maxHistory: 60,   // data points per metric

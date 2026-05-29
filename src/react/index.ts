@@ -5,4 +5,5 @@ export {
   useNetwork,
   useReact,
   useEvents,
+  useWebVitals,
 } from './hooks/index'

@@ -28,9 +28,15 @@ export type {
   EventSnapshot,
   MonitorEvent,
   EventCollectorConfig,
+  // Web Vitals
+  WebVitalName,
+  WebVitalMetric,
+  WebVitalsSnapshot,
+  WebVitalsCollectorConfig,
   // Collector interfaces
   IPerformanceCollector,
   INetworkCollector,
   IReactCollector,
   IEventCollector,
+  IWebVitalsCollector,
 } from './core/types'

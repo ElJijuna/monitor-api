@@ -7,13 +7,13 @@ export default defineConfig([
     dts: true,
     sourcemap: true,
     clean: true,
-    external: ['react', 'ssignal'],
+    external: ['react', 'ssignal', 'web-vitals'],
   },
   {
     entry: { 'react/index': 'src/react/index.ts' },
     format: ['esm', 'cjs'],
     dts: true,
     sourcemap: true,
-    external: ['react', 'ssignal'],
+    external: ['react', 'ssignal', 'web-vitals'],
   },
 ])
