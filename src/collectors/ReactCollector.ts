@@ -50,7 +50,6 @@ export class ReactCollector implements IReactCollector {
   readonly onCommit: SSignal<RenderEntry | null>
 
   #entries: SSignal<RenderEntry[]>
-  #byComponent: SSignal<Record<string, ComponentStats>>
   #totalCommits: SSignal<number>
   #slowThreshold: number
   #teardown: (() => void) | null = null
@@ -58,16 +57,15 @@ export class ReactCollector implements IReactCollector {
   constructor(private readonly config: ReactCollectorConfig) {
     this.#slowThreshold = config.slowThreshold
     this.#entries = new SSignal<RenderEntry[]>([])
-    this.#byComponent = new SSignal<Record<string, ComponentStats>>({})
     this.#totalCommits = new SSignal(0)
     this.onCommit = new SSignal<RenderEntry | null>(null)
 
     this.snapshot = computed(
-      [this.#entries, this.#byComponent, this.#totalCommits],
-      ([entries, byComponent, totalCommits]): ReactSnapshot => ({
+      [this.#entries, this.#totalCommits],
+      ([entries, totalCommits]): ReactSnapshot => ({
         totalCommits,
         entries,
-        byComponent,
+        byComponent: this.#computeByComponent(entries),
         slowComponents: entries.filter(e => e.duration >= this.#slowThreshold),
       }),
     )
@@ -95,7 +93,6 @@ export class ReactCollector implements IReactCollector {
 
   clearLog(): void {
     this.#entries.value = []
-    this.#byComponent.value = {}
     this.#totalCommits.value = 0
   }
 
@@ -143,34 +140,36 @@ export class ReactCollector implements IReactCollector {
     this.#entries.value = (prev: RenderEntry[]) =>
       [...prev, ...newEntries].slice(-this.config.maxHistory)
 
-    this.#byComponent.value = (prev: Record<string, ComponentStats>) => {
-      const next = { ...prev }
-      for (const entry of newEntries) {
-        const existing = next[entry.component]
-        if (existing) {
-          const renders = existing.renders + 1
-          const totalDuration = existing.totalDuration + entry.duration
-          next[entry.component] = {
-            renders,
-            totalDuration,
-            avgDuration: Math.round((totalDuration / renders) * 10) / 10,
-            lastRender: entry.timestamp,
-          }
-        } else {
-          next[entry.component] = {
-            renders: 1,
-            totalDuration: entry.duration,
-            avgDuration: entry.duration,
-            lastRender: entry.timestamp,
-          }
-        }
-      }
-      return next
-    }
-
     // Fire onCommit for the last entry of this batch
     const last = newEntries[newEntries.length - 1]
     if (last) this.onCommit.value = last
+  }
+
+  #computeByComponent(entries: RenderEntry[]): Record<string, ComponentStats> {
+    const byComponent: Record<string, ComponentStats> = {}
+
+    for (const entry of entries) {
+      const existing = byComponent[entry.component]
+      if (existing) {
+        const renders = existing.renders + 1
+        const totalDuration = existing.totalDuration + entry.duration
+        byComponent[entry.component] = {
+          renders,
+          totalDuration,
+          avgDuration: Math.round((totalDuration / renders) * 10) / 10,
+          lastRender: entry.timestamp,
+        }
+      } else {
+        byComponent[entry.component] = {
+          renders: 1,
+          totalDuration: entry.duration,
+          avgDuration: entry.duration,
+          lastRender: entry.timestamp,
+        }
+      }
+    }
+
+    return byComponent
   }
 
   #walkFiber(fiber: Fiber | null, entries: RenderEntry[], now: number, commitId: number): void {

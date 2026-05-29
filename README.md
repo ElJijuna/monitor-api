@@ -201,7 +201,7 @@ monitor.react.onCommit.subscribe((entry) => {
   console.log(`[React] ${entry.type} <${entry.component}> — ${entry.duration}ms`)
 })
 
-// Full snapshot with per-component aggregation
+// Full snapshot with per-component aggregation over retained history
 monitor.react.snapshot.subscribe((snap) => {
   console.log(`Total commits: ${snap.totalCommits}`)
 

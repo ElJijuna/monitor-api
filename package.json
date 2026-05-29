@@ -48,6 +48,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
@@ -57,14 +58,17 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",
-    "typescript": "^5.4.0",
-    "tsup": "^8.0.0"
+    "jest": "^30.4.2",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
   },
   "peerDependencies": {
     "react": ">=18.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true }
+    "react": {
+      "optional": true
+    }
   },
   "sideEffects": false,
   "engines": {
