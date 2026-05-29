@@ -84,6 +84,17 @@ export class EventCollector implements IEventCollector {
   }
 }
 
+/**
+ * Emits a custom application event that can be captured by the event collector.
+ *
+ * The event is dispatched on `window`, so it is ignored outside browser
+ * environments or before an event collector has been started.
+ *
+ * @example
+ * ```ts
+ * emitMonitorEvent('checkout:complete', { total: 49.99 })
+ * ```
+ */
 export function emitMonitorEvent(label: string, data?: Record<string, unknown>): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(

@@ -33,6 +33,22 @@ function resolveCollector<T>(
   return { ...defaults, ...(val as object) } as T
 }
 
+/**
+ * Creates a monitor instance with performance, network, React, and custom event collectors.
+ *
+ * The returned monitor is inert until {@link Monitor.start} is called. In non-browser
+ * environments, browser-only collectors safely no-op when started.
+ *
+ * @example
+ * ```ts
+ * const monitor = createMonitor({ maxHistory: 60 })
+ * monitor.start()
+ *
+ * const unsubscribe = monitor.subscribe((snapshot) => {
+ *   console.log(snapshot.network.window5s.count)
+ * })
+ * ```
+ */
 export function createMonitor(config: MonitorConfig = {}): Monitor {
   const maxHistory = config.maxHistory ?? 120
   const env = config.env ?? 'development'
