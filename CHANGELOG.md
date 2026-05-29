@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/ElJijuna/monitor-api/compare/v1.0.1...v1.1.0) (2026-05-29)
+
+
+### Features
+
+* add WebVitalsCollector with web-vitals integration ([252aa1b](https://github.com/ElJijuna/monitor-api/commit/252aa1b359dfe226141cf4439ea37b53fb0ea8b5))
+
 ## [1.0.1](https://github.com/ElJijuna/monitor-api/compare/v1.0.0...v1.0.1) (2026-05-29)
 
 
