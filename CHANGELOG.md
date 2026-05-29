@@ -1,3 +1,12 @@
+## [1.0.1](https://github.com/ElJijuna/monitor-api/compare/v1.0.0...v1.0.1) (2026-05-29)
+
+
+### Bug Fixes
+
+* defer production reporter until monitor start ([4e1a4f3](https://github.com/ElJijuna/monitor-api/commit/4e1a4f3267cb8422b08ce62cb2a683e33aaef393))
+* derive event label stats from retained history ([7206f4e](https://github.com/ElJijuna/monitor-api/commit/7206f4ec66dee76356088e811b8962a42cb212df))
+* harden production runtime lifecycle ([030ccae](https://github.com/ElJijuna/monitor-api/commit/030ccaece06bf1ad1d5a8c8a9657af875250ece5))
+
 # 1.0.0 (2026-05-29)
 
 
