@@ -16,17 +16,18 @@ export class EventCollector implements IEventCollector {
   readonly onEvent: SSignal<MonitorEvent | null>
 
   #entries: SSignal<MonitorEvent[]>
-  #byLabel: SSignal<Record<string, number>>
   #listener: ((e: Event) => void) | null = null
 
   constructor(private readonly config: EventCollectorConfig) {
     this.#entries = new SSignal<MonitorEvent[]>([])
-    this.#byLabel = new SSignal<Record<string, number>>({})
     this.onEvent = new SSignal<MonitorEvent | null>(null)
 
     this.snapshot = computed(
-      [this.#entries, this.#byLabel],
-      ([entries, byLabel]): EventSnapshot => ({ entries, byLabel }),
+      [this.#entries],
+      ([entries]): EventSnapshot => ({
+        entries,
+        byLabel: this.#computeByLabel(entries),
+      }),
     )
   }
 
@@ -49,7 +50,6 @@ export class EventCollector implements IEventCollector {
 
   clearLog(): void {
     this.#entries.value = []
-    this.#byLabel.value = {}
   }
 
   emit(label: string, data?: Record<string, unknown>): void {
@@ -73,12 +73,14 @@ export class EventCollector implements IEventCollector {
     this.#entries.value = (prev: MonitorEvent[]) =>
       [...prev, event].slice(-this.config.maxHistory)
 
-    this.#byLabel.value = (prev: Record<string, number>) => ({
-      ...prev,
-      [label]: (prev[label] ?? 0) + 1,
-    })
-
     this.onEvent.value = event
+  }
+
+  #computeByLabel(entries: MonitorEvent[]): Record<string, number> {
+    return entries.reduce<Record<string, number>>((byLabel, event) => {
+      byLabel[event.label] = (byLabel[event.label] ?? 0) + 1
+      return byLabel
+    }, {})
   }
 }
 
