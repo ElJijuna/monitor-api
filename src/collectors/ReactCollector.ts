@@ -73,6 +73,7 @@ export class ReactCollector implements IReactCollector {
 
   start(): void {
     if (typeof window === 'undefined') return
+    if (this.#teardown) return
     this.#teardown = this.#installHook()
   }
 

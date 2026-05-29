@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals'
 import { createMonitor, emitMonitorEvent } from '../src/index'
 
 if (typeof globalThis.CustomEvent === 'undefined') {
@@ -63,6 +64,27 @@ test('EventCollector clearLog resets retained entries and label counts', () => {
     entries: [],
     byLabel: {},
   })
+
+  monitor.destroy()
+})
+
+test('EventCollector start is idempotent', () => {
+  const target = new EventTarget()
+  const addEventListener = jest.spyOn(target, 'addEventListener')
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: target,
+  })
+
+  const monitor = createMonitor({
+    collectors: { events: true },
+  })
+
+  monitor.start()
+  monitor.start()
+
+  expect(addEventListener).toHaveBeenCalledTimes(1)
 
   monitor.destroy()
 })

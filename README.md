@@ -17,7 +17,8 @@ Captures FPS, JS heap, long tasks, CLS, network requests, React renders, and cus
 - **4 collectors** — Performance, Network, React, Events
 - **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`
 - **Zero config** — works out of the box, tree-shakeable
-- **SSR safe** — all browser APIs guarded with `typeof window !== 'undefined'`
+- **SSR safe** — browser collectors no-op outside the browser
+- **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
 - **TypeScript-first** — fully typed, zero `any` in the public API
 - **Tiny** — depends only on [ssignal](https://www.npmjs.com/package/ssignal)
 
@@ -69,6 +70,27 @@ monitor.start()    // start all collectors
 monitor.stop()     // pause (keeps data)
 monitor.destroy()  // stop + dispose all signals
 ```
+
+`monitor.start()` is idempotent. Calling it more than once does not duplicate
+event listeners, network patches, or React commit hooks.
+
+---
+
+## Runtime safety
+
+`monitor-api` is designed to run in development, staging, and production browser
+apps.
+
+- Importing and creating a monitor is SSR-safe.
+- Browser collectors no-op when `window` is unavailable.
+- Collection starts only after `monitor.start()`.
+- `monitor.stop()` and `monitor.destroy()` restore patched browser APIs.
+- Histories are bounded by `maxHistory`.
+- Production reporting starts only after `monitor.start()` and only when `fetch`
+  is available.
+
+For production apps, prefer a conservative `maxHistory`, select only the
+collectors you need, and use `report.transform` to send a compact payload.
 
 ---
 
@@ -140,7 +162,9 @@ interface PerformanceSnapshot {
 
 ### NetworkCollector
 
-Intercepts `fetch` and `XMLHttpRequest` transparently.
+Intercepts `fetch` and `XMLHttpRequest` transparently. `stop()`/`destroy()`
+restore the original `fetch`, `XMLHttpRequest.prototype.open`, and
+`XMLHttpRequest.prototype.send` implementations.
 
 ```ts
 monitor.start()
@@ -369,6 +393,7 @@ function ReactPanel() {
 ```ts
 const monitor = createMonitor({
   env: 'production',
+  maxHistory: 60,
   report: {
     endpoint: 'https://my-api.com/metrics',
     interval: 30_000,  // send every 30s
@@ -379,7 +404,13 @@ const monitor = createMonitor({
     }),
   },
 })
+
+monitor.start()
 ```
+
+Production reporting is intentionally best-effort: failed report requests are
+ignored so monitoring never breaks the application. If `fetch` is unavailable,
+the reporter does not start.
 
 ---
 
@@ -417,6 +448,22 @@ monitor-api/
 │       ├── index.cjs     ← React hooks (CJS)
 │       └── index.d.ts
 ```
+
+---
+
+## Development
+
+```sh
+npm run typecheck
+npm test
+npm run build
+npm run docs:build
+npm run bench
+```
+
+- `docs:build` generates TypeDoc HTML in `docs/`.
+- `bench` builds the package and runs runtime benchmarks from `bench/`.
+- Benchmark notes are tracked in `BENCH.md`.
 
 ---
 

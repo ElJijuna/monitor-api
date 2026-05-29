@@ -18,6 +18,7 @@ export class NetworkCollector implements INetworkCollector {
   #filter: (url: string) => boolean
   #originalFetch: typeof fetch | null = null
   #originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null
+  #originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null
 
   constructor(private readonly config: NetworkCollectorConfig) {
     this.#filter = config.filter ?? (() => true)
@@ -35,6 +36,7 @@ export class NetworkCollector implements INetworkCollector {
 
   start(): void {
     if (typeof window === 'undefined') return
+    if (this.#originalFetch || this.#originalXhrOpen || this.#originalXhrSend) return
     this.#patchFetch()
     this.#patchXhr()
   }
@@ -47,6 +49,10 @@ export class NetworkCollector implements INetworkCollector {
     if (this.#originalXhrOpen) {
       XMLHttpRequest.prototype.open = this.#originalXhrOpen
       this.#originalXhrOpen = null
+    }
+    if (this.#originalXhrSend) {
+      XMLHttpRequest.prototype.send = this.#originalXhrSend
+      this.#originalXhrSend = null
     }
   }
 
@@ -148,6 +154,7 @@ export class NetworkCollector implements INetworkCollector {
     const originalSend: typeof XMLHttpRequest.prototype.send = proto.send
 
     this.#originalXhrOpen = originalOpen
+    this.#originalXhrSend = originalSend
 
     proto.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
       ;(this as any).__mon_method = method.toUpperCase()

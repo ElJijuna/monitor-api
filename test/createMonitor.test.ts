@@ -51,3 +51,28 @@ test('production reporting does not start during construction', () => {
 
   monitor.destroy()
 })
+
+test('production reporting does not start without fetch', () => {
+  jest.useFakeTimers()
+
+  const originalFetch = globalThis.fetch
+  Reflect.deleteProperty(globalThis, 'fetch')
+
+  const monitor = createMonitor({
+    env: 'production',
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+    },
+  })
+
+  monitor.start()
+
+  expect(jest.getTimerCount()).toBe(0)
+
+  monitor.destroy()
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: originalFetch,
+  })
+})

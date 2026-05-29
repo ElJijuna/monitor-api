@@ -33,6 +33,7 @@ export class EventCollector implements IEventCollector {
 
   start(): void {
     if (typeof window === 'undefined') return
+    if (this.#listener) return
     this.#listener = (e: Event) => this.#handleEvent(e as CustomEvent)
     window.addEventListener(CUSTOM_EVENT_NAME, this.#listener)
   }

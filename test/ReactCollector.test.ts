@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals'
 import { createMonitor } from '../src/index'
 
 if (typeof globalThis.CustomEvent === 'undefined') {
@@ -84,6 +85,42 @@ test('React byComponent is derived from retained history', () => {
   expect(snapshot.byComponent.Third).toBeDefined()
   expect(snapshot.byComponent.Second?.renders).toBe(1)
   expect(snapshot.byComponent.Third?.totalDuration).toBe(3)
+
+  monitor.destroy()
+})
+
+test('ReactCollector start is idempotent', () => {
+  const original = jest.fn()
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: {
+        onCommitFiberRoot: original,
+      },
+    },
+  })
+
+  const monitor = createMonitor({
+    collectors: { react: true },
+  })
+
+  monitor.start()
+  const firstPatch = (globalThis.window as unknown as {
+    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
+  }).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot
+
+  monitor.start()
+  const secondPatch = (globalThis.window as unknown as {
+    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
+  }).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot
+
+  expect(secondPatch).toBe(firstPatch)
+
+  monitor.stop()
+  expect((globalThis.window as unknown as {
+    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
+  }).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot).toBe(original)
 
   monitor.destroy()
 })

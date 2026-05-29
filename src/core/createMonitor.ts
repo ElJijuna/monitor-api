@@ -93,6 +93,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
 
   function startReporter() {
     if (env !== 'production' || !config.report || reporterInterval !== null) return
+    if (typeof fetch === 'undefined') return
     const { endpoint, interval, transform } = config.report
     reporterInterval = setInterval(() => {
       const snap = signal.value

@@ -101,3 +101,65 @@ test('NetworkCollector restores fetch when stopped', () => {
 
   monitor.destroy()
 })
+
+test('NetworkCollector restores XMLHttpRequest open and send when stopped', () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response())
+  const originalOpen = FakeXMLHttpRequest.prototype.open
+  const originalSend = FakeXMLHttpRequest.prototype.send
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  })
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  })
+
+  const monitor = createMonitor({
+    collectors: { network: true },
+  })
+
+  monitor.start()
+  expect(FakeXMLHttpRequest.prototype.open).not.toBe(originalOpen)
+  expect(FakeXMLHttpRequest.prototype.send).not.toBe(originalSend)
+
+  monitor.stop()
+  expect(FakeXMLHttpRequest.prototype.open).toBe(originalOpen)
+  expect(FakeXMLHttpRequest.prototype.send).toBe(originalSend)
+
+  monitor.destroy()
+})
+
+test('NetworkCollector start is idempotent', () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response())
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  })
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  })
+
+  const monitor = createMonitor({
+    collectors: { network: true },
+  })
+
+  monitor.start()
+  const patchedFetch = (globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch
+  const patchedOpen = FakeXMLHttpRequest.prototype.open
+  const patchedSend = FakeXMLHttpRequest.prototype.send
+
+  monitor.start()
+
+  expect((globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch).toBe(patchedFetch)
+  expect(FakeXMLHttpRequest.prototype.open).toBe(patchedOpen)
+  expect(FakeXMLHttpRequest.prototype.send).toBe(patchedSend)
+
+  monitor.stop()
+  expect((globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch).toBe(fetch)
+
+  monitor.destroy()
+})

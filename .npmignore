@@ -6,6 +6,7 @@ docs/
 
 # Tooling config
 .github/
+BENCH.md
 jest.config.cjs
 jest.transform.cjs
 release.config.cjs
