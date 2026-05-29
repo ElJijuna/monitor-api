@@ -1,8 +1,9 @@
-import { createMonitor } from '../dist/index.js'
+import { createMonitor } from '../src/index'
+import type { MonitorSnapshot } from '../src/core/types'
 
 test('createMonitor exposes a combined snapshot and subscription API', () => {
   const monitor = createMonitor()
-  const snapshots = []
+  const snapshots: MonitorSnapshot[] = []
   const unsubscribe = monitor.subscribe((snapshot) => snapshots.push(snapshot))
 
   monitor.events.clearLog()

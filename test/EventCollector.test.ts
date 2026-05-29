@@ -1,22 +1,28 @@
-import { createMonitor, emitMonitorEvent } from '../dist/index.js'
+import { createMonitor, emitMonitorEvent } from '../src/index'
 
 if (typeof globalThis.CustomEvent === 'undefined') {
-  globalThis.CustomEvent = class CustomEvent extends Event {
-    detail
+  Object.defineProperty(globalThis, 'CustomEvent', {
+    configurable: true,
+    value: class TestCustomEvent<T = unknown> extends Event {
+      readonly detail: T
 
-    constructor(type, init = {}) {
-      super(type, init)
-      this.detail = init.detail
-    }
-  }
+      constructor(type: string, init: CustomEventInit<T> = {}) {
+        super(type, init)
+        this.detail = init.detail as T
+      }
+    },
+  })
 }
 
 afterEach(() => {
-  delete globalThis.window
+  Reflect.deleteProperty(globalThis, 'window')
 })
 
 test('EventCollector keeps entries and label counts inside retained history', () => {
-  globalThis.window = new EventTarget()
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: new EventTarget(),
+  })
 
   const monitor = createMonitor({
     maxHistory: 2,
@@ -38,7 +44,10 @@ test('EventCollector keeps entries and label counts inside retained history', ()
 })
 
 test('EventCollector clearLog resets retained entries and label counts', () => {
-  globalThis.window = new EventTarget()
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: new EventTarget(),
+  })
 
   const monitor = createMonitor({
     maxHistory: 3,

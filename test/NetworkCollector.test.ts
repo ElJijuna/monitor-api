@@ -1,10 +1,10 @@
 import { jest } from '@jest/globals'
-import { createMonitor } from '../dist/index.js'
+import { createMonitor } from '../src/index'
 
 class FakeXMLHttpRequest {
-  static lastInstance
+  static lastInstance: FakeXMLHttpRequest | null = null
 
-  listeners = new Map()
+  listeners = new Map<string, () => void>()
   response = ''
   status = 200
 
@@ -12,27 +12,35 @@ class FakeXMLHttpRequest {
     FakeXMLHttpRequest.lastInstance = this
   }
 
-  open() {}
+  open(): void {}
 
-  send() {
+  send(): void {
     this.listeners.get('loadend')?.()
   }
 
-  addEventListener(name, listener) {
+  addEventListener(name: string, listener: () => void): void {
     this.listeners.set(name, listener)
   }
 }
 
 afterEach(() => {
-  delete globalThis.window
-  delete globalThis.XMLHttpRequest
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'XMLHttpRequest')
 })
 
 test('NetworkCollector records filtered fetch requests inside maxHistory', async () => {
-  globalThis.window = {
-    fetch: jest.fn(async (url) => new Response(url, { status: 201 })),
-  }
-  globalThis.XMLHttpRequest = FakeXMLHttpRequest
+  const fetchMock: typeof fetch = async (input) => new Response(String(input), { status: 201 })
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      fetch: jest.fn(fetchMock),
+    },
+  })
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  })
 
   const monitor = createMonitor({
     maxHistory: 2,
@@ -45,17 +53,22 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
 
   monitor.start()
 
-  await globalThis.window.fetch('/drop')
-  await globalThis.window.fetch('/keep/one', { method: 'post', body: 'abc' })
-  await globalThis.window.fetch('/keep/two')
-  await globalThis.window.fetch('/keep/three')
+  const testWindow = globalThis.window as unknown as { fetch: typeof fetch }
+
+  await testWindow.fetch('/drop')
+  await testWindow.fetch('/keep/one', { method: 'post', body: 'abc' })
+  await testWindow.fetch('/keep/two')
+  await testWindow.fetch('/keep/three')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const snapshot = monitor.network.snapshot.value
 
   expect(snapshot.entries.map((entry) => entry.url)).toEqual(['/keep/two', '/keep/three'])
-  expect(snapshot.entries[0].method).toBe('GET')
-  expect(snapshot.entries[1].status).toBe(201)
+  const [firstEntry, secondEntry] = snapshot.entries
+  expect(firstEntry).toBeDefined()
+  expect(secondEntry).toBeDefined()
+  expect(firstEntry?.method).toBe('GET')
+  expect(secondEntry?.status).toBe(201)
   expect(snapshot.window5s.count).toBe(2)
   expect(snapshot.window5s.errorRate).toBe(0)
 
@@ -63,19 +76,28 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
 })
 
 test('NetworkCollector restores fetch when stopped', () => {
-  const fetch = jest.fn()
-  globalThis.window = { fetch }
-  globalThis.XMLHttpRequest = FakeXMLHttpRequest
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response())
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  })
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  })
 
   const monitor = createMonitor({
     collectors: { network: true },
   })
 
   monitor.start()
-  expect(globalThis.window.fetch).not.toBe(fetch)
+  const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch }
+
+  expect(testWindow.fetch).not.toBe(fetch)
 
   monitor.stop()
-  expect(globalThis.window.fetch).toBe(fetch)
+  expect(testWindow.fetch).toBe(fetch)
 
   monitor.destroy()
 })

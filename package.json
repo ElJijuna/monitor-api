@@ -49,8 +49,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "release": "semantic-release",
-    "test": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {

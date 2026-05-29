@@ -1,4 +1,4 @@
-import { createMonitor } from '../dist/index.js'
+import { createMonitor } from '../src/index'
 
 const originalMemoryDescriptor = Object.getOwnPropertyDescriptor(globalThis.performance, 'memory')
 
@@ -6,7 +6,7 @@ afterEach(() => {
   if (originalMemoryDescriptor) {
     Object.defineProperty(globalThis.performance, 'memory', originalMemoryDescriptor)
   } else {
-    delete globalThis.performance.memory
+    Reflect.deleteProperty(globalThis.performance, 'memory')
   }
 })
 
