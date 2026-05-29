@@ -91,7 +91,8 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
 
   let reporterInterval: ReturnType<typeof setInterval> | null = null
 
-  if (env === 'production' && config.report) {
+  function startReporter() {
+    if (env !== 'production' || !config.report || reporterInterval !== null) return
     const { endpoint, interval, transform } = config.report
     reporterInterval = setInterval(() => {
       const snap = signal.value
@@ -104,11 +105,19 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     }, interval)
   }
 
+  function stopReporter() {
+    if (reporterInterval !== null) {
+      clearInterval(reporterInterval)
+      reporterInterval = null
+    }
+  }
+
   function startAll() {
     if (active.performance) performance.start()
     if (active.network) network.start()
     if (active.react) react.start()
     if (active.events) events.start()
+    startReporter()
   }
 
   function stopAll() {
@@ -116,13 +125,11 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network.stop()
     react.stop()
     events.stop()
+    stopReporter()
   }
 
   function destroyAll() {
-    if (reporterInterval !== null) {
-      clearInterval(reporterInterval)
-      reporterInterval = null
-    }
+    stopReporter()
     performance.destroy()
     network.destroy()
     react.destroy()
