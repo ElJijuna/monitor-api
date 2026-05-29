@@ -6,22 +6,28 @@ export type {
   Monitor,
   MonitorSnapshot,
   MonitorConfig,
+  ProductionReportConfig,
+  CollectorName,
   // Performance
   PerformanceSnapshot,
   MemoryInfo,
   LongTaskInfo,
+  PerformanceCollectorConfig,
   // Network
   NetworkSnapshot,
   NetworkEntry,
   NetworkWindow5s,
+  NetworkCollectorConfig,
   // React
   ReactSnapshot,
   RenderEntry,
   RenderPhase,
   ComponentStats,
+  ReactCollectorConfig,
   // Events
   EventSnapshot,
   MonitorEvent,
+  EventCollectorConfig,
   // Collector interfaces
   IPerformanceCollector,
   INetworkCollector,

@@ -1,6 +1,7 @@
 # Source and tests
 src/
 test/
+docs/
 
 # Tooling config
 .github/
@@ -9,6 +10,7 @@ jest.transform.cjs
 release.config.cjs
 tsconfig.json
 tsconfig.test.json
+typedoc.json
 tsup.config.ts
 
 # Local/development files

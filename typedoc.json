@@ -1,0 +1,17 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts", "src/react/index.ts"],
+  "entryPointStrategy": "resolve",
+  "out": "docs",
+  "name": "monitor-api",
+  "includeVersion": true,
+  "readme": "README.md",
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "hideGenerator": true,
+  "navigationLinks": {
+    "GitHub": "https://github.com/ElJijuna/monitor-api",
+    "npm": "https://www.npmjs.com/package/monitor-api"
+  }
+}
