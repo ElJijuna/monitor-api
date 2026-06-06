@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from 'react'
-import type SSignal from 'ssignal'
+import { useSyncExternalStore } from 'react';
+import type SSignal from 'ssignal';
 
 /**
  * Subscribes a React component to an `SSignal` value.
@@ -12,5 +12,5 @@ export function useSignal<T>(signal: SSignal<T>): T {
     (notify) => signal.subscribe(() => notify()),
     () => signal.value,
     () => signal.value,
-  )
+  );
 }

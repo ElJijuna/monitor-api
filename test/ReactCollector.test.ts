@@ -1,36 +1,36 @@
-import { jest } from '@jest/globals'
-import { createMonitor } from '../src/index'
+import { jest } from '@jest/globals';
+import { createMonitor } from '../src/index';
 
 if (typeof globalThis.CustomEvent === 'undefined') {
   Object.defineProperty(globalThis, 'CustomEvent', {
     configurable: true,
     value: class TestCustomEvent<T = unknown> extends Event {
-      readonly detail: T
+      readonly detail: T;
 
       constructor(type: string, init: CustomEventInit<T> = {}) {
-        super(type, init)
-        this.detail = init.detail as T
+        super(type, init);
+        this.detail = init.detail as T;
       }
     },
-  })
+  });
 }
 
 afterEach(() => {
-  Reflect.deleteProperty(globalThis, 'window')
-})
+  Reflect.deleteProperty(globalThis, 'window');
+});
 
 interface TestFiber {
-  tag: number
-  type: unknown
-  alternate: null
-  child: null
-  sibling: null
-  flags: number
-  actualDuration: number
+  tag: number;
+  type: unknown;
+  alternate: null;
+  child: null;
+  sibling: null;
+  flags: number;
+  actualDuration: number;
 }
 
 interface ReactDevToolsHook {
-  onCommitFiberRoot(rendererID: number, root: { current: TestFiber }): void
+  onCommitFiberRoot(rendererID: number, root: { current: TestFiber }): void;
 }
 
 function fiberFor(type: unknown, actualDuration = 1): TestFiber {
@@ -42,24 +42,24 @@ function fiberFor(type: unknown, actualDuration = 1): TestFiber {
     sibling: null,
     flags: 0,
     actualDuration,
-  }
+  };
 }
 
 function commit(type: unknown, actualDuration = 1): void {
   const testWindow = globalThis.window as unknown as {
-    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
-  }
+    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+  };
 
   testWindow.__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot(1, {
     current: fiberFor(type, actualDuration),
-  })
+  });
 }
 
 test('React byComponent is derived from retained history', () => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {},
-  })
+  });
 
   function First() {}
   function Second() {}
@@ -68,29 +68,29 @@ test('React byComponent is derived from retained history', () => {
   const monitor = createMonitor({
     maxHistory: 2,
     collectors: { react: true },
-  })
+  });
 
-  monitor.start()
+  monitor.start();
 
-  commit(First, 1)
-  commit(Second, 2)
-  commit(Third, 3)
+  commit(First, 1);
+  commit(Second, 2);
+  commit(Third, 3);
 
-  const snapshot = monitor.react.snapshot.value
+  const snapshot = monitor.react.snapshot.value;
 
-  expect(snapshot.entries.map((entry) => entry.component)).toEqual(['Second', 'Third'])
-  expect(Object.keys(snapshot.byComponent)).toEqual(['Second', 'Third'])
-  expect(snapshot.byComponent.First).toBeUndefined()
-  expect(snapshot.byComponent.Second).toBeDefined()
-  expect(snapshot.byComponent.Third).toBeDefined()
-  expect(snapshot.byComponent.Second?.renders).toBe(1)
-  expect(snapshot.byComponent.Third?.totalDuration).toBe(3)
+  expect(snapshot.entries.map((entry) => entry.component)).toEqual(['Second', 'Third']);
+  expect(Object.keys(snapshot.byComponent)).toEqual(['Second', 'Third']);
+  expect(snapshot.byComponent.First).toBeUndefined();
+  expect(snapshot.byComponent.Second).toBeDefined();
+  expect(snapshot.byComponent.Third).toBeDefined();
+  expect(snapshot.byComponent.Second?.renders).toBe(1);
+  expect(snapshot.byComponent.Third?.totalDuration).toBe(3);
 
-  monitor.destroy()
-})
+  monitor.destroy();
+});
 
 test('ReactCollector start is idempotent', () => {
-  const original = jest.fn()
+  const original = jest.fn();
 
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -99,28 +99,36 @@ test('ReactCollector start is idempotent', () => {
         onCommitFiberRoot: original,
       },
     },
-  })
+  });
 
   const monitor = createMonitor({
     collectors: { react: true },
-  })
+  });
 
-  monitor.start()
-  const firstPatch = (globalThis.window as unknown as {
-    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
-  }).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot
+  monitor.start();
+  const firstPatch = (
+    globalThis.window as unknown as {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+    }
+  ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot;
 
-  monitor.start()
-  const secondPatch = (globalThis.window as unknown as {
-    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
-  }).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot
+  monitor.start();
+  const secondPatch = (
+    globalThis.window as unknown as {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+    }
+  ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot;
 
-  expect(secondPatch).toBe(firstPatch)
+  expect(secondPatch).toBe(firstPatch);
 
-  monitor.stop()
-  expect((globalThis.window as unknown as {
-    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook
-  }).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot).toBe(original)
+  monitor.stop();
+  expect(
+    (
+      globalThis.window as unknown as {
+        __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+      }
+    ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot,
+  ).toBe(original);
 
-  monitor.destroy()
-})
+  monitor.destroy();
+});

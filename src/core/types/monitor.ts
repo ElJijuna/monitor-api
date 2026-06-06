@@ -1,38 +1,42 @@
-import type SSignal from 'ssignal'
-import type { PerformanceSnapshot, PerformanceCollectorConfig, IPerformanceCollector } from './performance'
-import type { NetworkSnapshot, NetworkCollectorConfig, INetworkCollector } from './network'
-import type { ReactSnapshot, ReactCollectorConfig, IReactCollector } from './react'
-import type { EventSnapshot, EventCollectorConfig, IEventCollector } from './events'
-import type { WebVitalsSnapshot, WebVitalsCollectorConfig, IWebVitalsCollector } from './webVitals'
+import type SSignal from 'ssignal';
+import type { EventCollectorConfig, EventSnapshot, IEventCollector } from './events';
+import type { INetworkCollector, NetworkCollectorConfig, NetworkSnapshot } from './network';
+import type {
+  IPerformanceCollector,
+  PerformanceCollectorConfig,
+  PerformanceSnapshot,
+} from './performance';
+import type { IReactCollector, ReactCollectorConfig, ReactSnapshot } from './react';
+import type { IWebVitalsCollector, WebVitalsCollectorConfig, WebVitalsSnapshot } from './webVitals';
 
 /** Complete point-in-time state collected by a monitor instance. */
 export interface MonitorSnapshot {
   /** Unix timestamp in milliseconds for when the combined snapshot was computed. */
-  timestamp: number
+  timestamp: number;
   /** Browser performance metrics such as FPS, memory, long tasks, and CLS. */
-  performance: PerformanceSnapshot
+  performance: PerformanceSnapshot;
   /** Network request history and rolling request statistics. */
-  network: NetworkSnapshot
+  network: NetworkSnapshot;
   /** React render history and per-component render statistics. */
-  react: ReactSnapshot
+  react: ReactSnapshot;
   /** Custom application events emitted through the monitor event API. */
-  events: EventSnapshot
+  events: EventSnapshot;
   /** Standard Web Vitals metrics collected from the browser. */
-  webVitals: WebVitalsSnapshot
+  webVitals: WebVitalsSnapshot;
 }
 
 /** Configuration for periodic production reporting. */
 export interface ProductionReportConfig {
   /** HTTP endpoint that receives monitor snapshots. */
-  endpoint: string
+  endpoint: string;
   /** Reporting interval in milliseconds. */
-  interval: number
+  interval: number;
   /** Optional mapper used to reduce or reshape the payload before it is posted. */
-  transform?: (snap: MonitorSnapshot) => unknown
+  transform?: (snap: MonitorSnapshot) => unknown;
 }
 
 /** Built-in collector names accepted by {@link MonitorConfig.collectors}. */
-export type CollectorName = 'performance' | 'network' | 'react' | 'events' | 'webVitals'
+export type CollectorName = 'performance' | 'network' | 'react' | 'events' | 'webVitals';
 
 /** Options used when creating a monitor instance. */
 export interface MonitorConfig {
@@ -42,47 +46,49 @@ export interface MonitorConfig {
    * Use an array to enable only selected collectors, or an object to enable,
    * disable, or override individual collector settings.
    */
-  collectors?: CollectorName[] | {
-    performance?: boolean | Partial<PerformanceCollectorConfig>
-    network?: boolean | Partial<NetworkCollectorConfig>
-    react?: boolean | Partial<ReactCollectorConfig>
-    events?: boolean | Partial<EventCollectorConfig>
-    webVitals?: boolean | Partial<WebVitalsCollectorConfig>
-  }
+  collectors?:
+    | CollectorName[]
+    | {
+        performance?: boolean | Partial<PerformanceCollectorConfig>;
+        network?: boolean | Partial<NetworkCollectorConfig>;
+        react?: boolean | Partial<ReactCollectorConfig>;
+        events?: boolean | Partial<EventCollectorConfig>;
+        webVitals?: boolean | Partial<WebVitalsCollectorConfig>;
+      };
   /** Reserved for future sampling support. */
-  sampleRate?: number
+  sampleRate?: number;
   /** Maximum number of retained entries per collector history. Defaults to 120. */
-  maxHistory?: number
+  maxHistory?: number;
   /** Convenience filter applied to network request URLs. */
-  networkFilter?: (url: string) => boolean
+  networkFilter?: (url: string) => boolean;
   /** Runtime environment. Production enables periodic reporting when {@link report} is configured. */
-  env?: 'development' | 'production'
+  env?: 'development' | 'production';
   /** Optional production reporting configuration. */
-  report?: ProductionReportConfig
+  report?: ProductionReportConfig;
 }
 
 /** Runtime monitor facade returned by {@link createMonitor}. */
 export interface Monitor {
   /** Performance collector API. */
-  performance: IPerformanceCollector
+  performance: IPerformanceCollector;
   /** Network collector API. */
-  network: INetworkCollector
+  network: INetworkCollector;
   /** React render collector API. */
-  react: IReactCollector
+  react: IReactCollector;
   /** Custom event collector API. */
-  events: IEventCollector
+  events: IEventCollector;
   /** Web Vitals collector API. */
-  webVitals: IWebVitalsCollector
+  webVitals: IWebVitalsCollector;
   /** Reactive signal containing the combined monitor snapshot. */
-  signal: SSignal<MonitorSnapshot>
+  signal: SSignal<MonitorSnapshot>;
   /** Returns the latest combined snapshot synchronously. */
-  getSnapshot(): MonitorSnapshot
+  getSnapshot(): MonitorSnapshot;
   /** Subscribes to combined snapshot changes and returns an unsubscribe function. */
-  subscribe(cb: (snap: MonitorSnapshot) => void): () => void
+  subscribe(cb: (snap: MonitorSnapshot) => void): () => void;
   /** Starts all enabled collectors. Safe to call in browsers; no-ops where unsupported. */
-  start(): void
+  start(): void;
   /** Stops active collector hooks, timers, and patches. */
-  stop(): void
+  stop(): void;
   /** Stops collectors and releases signal subscriptions owned by this monitor. */
-  destroy(): void
+  destroy(): void;
 }

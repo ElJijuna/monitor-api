@@ -5,4 +5,4 @@ module.exports = {
   transform: {
     '^.+\\.ts$': '<rootDir>/jest.transform.cjs',
   },
-}
+};

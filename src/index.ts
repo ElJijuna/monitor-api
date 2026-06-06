@@ -1,42 +1,42 @@
-export { createMonitor } from './core/createMonitor'
-export { emitMonitorEvent } from './collectors/EventCollector'
+export { emitMonitorEvent } from './collectors/EventCollector';
+export { createMonitor } from './core/createMonitor';
 
 export type {
+  CollectorName,
+  ComponentStats,
+  EventCollectorConfig,
+  // Events
+  EventSnapshot,
+  IEventCollector,
+  INetworkCollector,
+  // Collector interfaces
+  IPerformanceCollector,
+  IReactCollector,
+  IWebVitalsCollector,
+  LongTaskInfo,
+  MemoryInfo,
   // Core
   Monitor,
-  MonitorSnapshot,
   MonitorConfig,
-  ProductionReportConfig,
-  CollectorName,
-  // Performance
-  PerformanceSnapshot,
-  MemoryInfo,
-  LongTaskInfo,
-  PerformanceCollectorConfig,
+  MonitorEvent,
+  MonitorSnapshot,
+  NetworkCollectorConfig,
+  NetworkEntry,
   // Network
   NetworkSnapshot,
-  NetworkEntry,
   NetworkWindow5s,
-  NetworkCollectorConfig,
+  PerformanceCollectorConfig,
+  // Performance
+  PerformanceSnapshot,
+  ProductionReportConfig,
+  ReactCollectorConfig,
   // React
   ReactSnapshot,
   RenderEntry,
   RenderPhase,
-  ComponentStats,
-  ReactCollectorConfig,
-  // Events
-  EventSnapshot,
-  MonitorEvent,
-  EventCollectorConfig,
+  WebVitalMetric,
   // Web Vitals
   WebVitalName,
-  WebVitalMetric,
-  WebVitalsSnapshot,
   WebVitalsCollectorConfig,
-  // Collector interfaces
-  IPerformanceCollector,
-  INetworkCollector,
-  IReactCollector,
-  IEventCollector,
-  IWebVitalsCollector,
-} from './core/types'
+  WebVitalsSnapshot,
+} from './core/types';

@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsup'
+import { defineConfig } from 'tsup';
 
 export default defineConfig([
   {
@@ -16,4 +16,4 @@ export default defineConfig([
     sourcemap: true,
     external: ['react', 'ssignal', 'web-vitals'],
   },
-])
+]);

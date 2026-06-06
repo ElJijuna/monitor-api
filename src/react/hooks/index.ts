@@ -1,7 +1,7 @@
-export { useSignal } from './useSignal'
-export { useMonitor } from './useMonitor'
-export { usePerformance } from './usePerformance'
-export { useNetwork } from './useNetwork'
-export { useReact } from './useReact'
-export { useEvents } from './useEvents'
-export { useWebVitals } from './useWebVitals'
+export { useEvents } from './useEvents';
+export { useMonitor } from './useMonitor';
+export { useNetwork } from './useNetwork';
+export { usePerformance } from './usePerformance';
+export { useReact } from './useReact';
+export { useSignal } from './useSignal';
+export { useWebVitals } from './useWebVitals';

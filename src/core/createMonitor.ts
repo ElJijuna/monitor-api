@@ -1,38 +1,43 @@
-import { computed } from 'ssignal'
-import { PerformanceCollector } from '../collectors/PerformanceCollector'
-import { NetworkCollector } from '../collectors/NetworkCollector'
-import { ReactCollector } from '../collectors/ReactCollector'
-import { EventCollector } from '../collectors/EventCollector'
-import { WebVitalsCollector } from '../collectors/WebVitalsCollector'
+import { computed } from 'ssignal';
+import { EventCollector } from '../collectors/EventCollector';
+import { NetworkCollector } from '../collectors/NetworkCollector';
+import { PerformanceCollector } from '../collectors/PerformanceCollector';
+import { ReactCollector } from '../collectors/ReactCollector';
+import { WebVitalsCollector } from '../collectors/WebVitalsCollector';
 import type {
+  CollectorName,
+  EventCollectorConfig,
   Monitor,
   MonitorConfig,
   MonitorSnapshot,
-  CollectorName,
-  PerformanceCollectorConfig,
   NetworkCollectorConfig,
+  PerformanceCollectorConfig,
   ReactCollectorConfig,
-  EventCollectorConfig,
   WebVitalsCollectorConfig,
-} from './types'
+} from './types';
 
-function resolveCollector<T>(
-  name: CollectorName,
-  config: MonitorConfig,
-  defaults: T,
-): T | false {
-  const { collectors } = config
+function resolveCollector<T>(name: CollectorName, config: MonitorConfig, defaults: T): T | false {
+  const { collectors } = config;
 
-  if (!collectors) return defaults  // all enabled by default
+  if (!collectors) {
+    return defaults;
+  } // all enabled by default
 
   if (Array.isArray(collectors)) {
-    return collectors.includes(name) ? defaults : false
+    return collectors.includes(name) ? defaults : false;
   }
 
-  const val = collectors[name]
-  if (val === false || val === undefined) return false
-  if (val === true) return defaults
-  return { ...defaults, ...(val as object) } as T
+  const val = collectors[name];
+
+  if (val === false || val === undefined) {
+    return false;
+  }
+
+  if (val === true) {
+    return defaults;
+  }
+
+  return { ...defaults, ...(val as object) } as T;
 }
 
 /**
@@ -53,31 +58,33 @@ function resolveCollector<T>(
  * ```
  */
 export function createMonitor(config: MonitorConfig = {}): Monitor {
-  const maxHistory = config.maxHistory ?? 120
-  const env = config.env ?? 'development'
+  const maxHistory = config.maxHistory ?? 120;
+  const env = config.env ?? 'development';
 
-  const perfConfig: PerformanceCollectorConfig = { maxHistory }
+  const perfConfig: PerformanceCollectorConfig = { maxHistory };
   const netConfig: NetworkCollectorConfig = {
     maxHistory,
     ...(config.networkFilter ? { filter: config.networkFilter } : {}),
-  }
-  const reactConfig: ReactCollectorConfig = { maxHistory, slowThreshold: 16 }
-  const eventsConfig: EventCollectorConfig = { maxHistory }
-  const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true }
+  };
+  const reactConfig: ReactCollectorConfig = { maxHistory, slowThreshold: 16 };
+  const eventsConfig: EventCollectorConfig = { maxHistory };
+  const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true };
 
-  const perfCfg = resolveCollector('performance', config, perfConfig)
-  const netCfg = resolveCollector('network', config, netConfig)
-  const reactCfg = resolveCollector('react', config, reactConfig)
-  const eventsCfg = resolveCollector('events', config, eventsConfig)
-  const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig)
+  const perfCfg = resolveCollector('performance', config, perfConfig);
+  const netCfg = resolveCollector('network', config, netConfig);
+  const reactCfg = resolveCollector('react', config, reactConfig);
+  const eventsCfg = resolveCollector('events', config, eventsConfig);
+  const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig);
 
-  const performance = perfCfg ? new PerformanceCollector(perfCfg) : new PerformanceCollector(perfConfig)
-  const network = netCfg ? new NetworkCollector(netCfg) : new NetworkCollector(netConfig)
-  const react = reactCfg ? new ReactCollector(reactCfg) : new ReactCollector(reactConfig)
-  const events = eventsCfg ? new EventCollector(eventsCfg) : new EventCollector(eventsConfig)
+  const performance = perfCfg
+    ? new PerformanceCollector(perfCfg)
+    : new PerformanceCollector(perfConfig);
+  const network = netCfg ? new NetworkCollector(netCfg) : new NetworkCollector(netConfig);
+  const react = reactCfg ? new ReactCollector(reactCfg) : new ReactCollector(reactConfig);
+  const events = eventsCfg ? new EventCollector(eventsCfg) : new EventCollector(eventsConfig);
   const webVitals = webVitalsCfg
     ? new WebVitalsCollector(webVitalsCfg)
-    : new WebVitalsCollector(webVitalsConfig)
+    : new WebVitalsCollector(webVitalsConfig);
 
   const signal = computed(
     [performance.snapshot, network.snapshot, react.snapshot, events.snapshot, webVitals.snapshot],
@@ -89,7 +96,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       events: evts,
       webVitals: webVitalsSnap,
     }),
-  )
+  );
 
   const active = {
     performance: perfCfg !== false,
@@ -97,58 +104,81 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     react: reactCfg !== false,
     events: eventsCfg !== false,
     webVitals: webVitalsCfg !== false,
-  }
+  };
 
-  let reporterInterval: ReturnType<typeof setInterval> | null = null
+  let reporterInterval: ReturnType<typeof setInterval> | null = null;
 
   function startReporter() {
-    if (env !== 'production' || !config.report || reporterInterval !== null) return
-    if (typeof fetch === 'undefined') return
-    const { endpoint, interval, transform } = config.report
+    if (env !== 'production' || !config.report || reporterInterval !== null) {
+      return;
+    }
+
+    if (typeof fetch === 'undefined') {
+      return;
+    }
+
+    const { endpoint, interval, transform } = config.report;
+
     reporterInterval = setInterval(() => {
-      const snap = signal.value
-      const payload = transform ? transform(snap) : snap
+      const snap = signal.value;
+      const payload = transform ? transform(snap) : snap;
+
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).catch(() => {})
-    }, interval)
+      }).catch(() => {});
+    }, interval);
   }
 
   function stopReporter() {
     if (reporterInterval !== null) {
-      clearInterval(reporterInterval)
-      reporterInterval = null
+      clearInterval(reporterInterval);
+      reporterInterval = null;
     }
   }
 
   function startAll() {
-    if (active.performance) performance.start()
-    if (active.network) network.start()
-    if (active.react) react.start()
-    if (active.events) events.start()
-    if (active.webVitals) webVitals.start()
-    startReporter()
+    if (active.performance) {
+      performance.start();
+    }
+
+    if (active.network) {
+      network.start();
+    }
+
+    if (active.react) {
+      react.start();
+    }
+
+    if (active.events) {
+      events.start();
+    }
+
+    if (active.webVitals) {
+      webVitals.start();
+    }
+
+    startReporter();
   }
 
   function stopAll() {
-    performance.stop()
-    network.stop()
-    react.stop()
-    events.stop()
-    webVitals.stop()
-    stopReporter()
+    performance.stop();
+    network.stop();
+    react.stop();
+    events.stop();
+    webVitals.stop();
+    stopReporter();
   }
 
   function destroyAll() {
-    stopReporter()
-    performance.destroy()
-    network.destroy()
-    react.destroy()
-    events.destroy()
-    webVitals.destroy()
-    signal.dispose()
+    stopReporter();
+    performance.destroy();
+    network.destroy();
+    react.destroy();
+    events.destroy();
+    webVitals.destroy();
+    signal.dispose();
   }
 
   const monitor: Monitor = {
@@ -163,7 +193,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     start: startAll,
     stop: stopAll,
     destroy: destroyAll,
-  }
+  };
 
-  return monitor
+  return monitor;
 }

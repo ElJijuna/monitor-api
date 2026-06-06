@@ -1,67 +1,67 @@
-import type SSignal from 'ssignal'
+import type SSignal from 'ssignal';
 
 /** JavaScript heap usage reported by Chromium-based browsers. */
 export interface MemoryInfo {
   /** Used JavaScript heap size in megabytes. */
-  used: number
+  used: number;
   /** JavaScript heap size limit in megabytes. */
-  total: number
+  total: number;
   /** Used heap percentage from 0 to 100. */
-  percent: number
+  percent: number;
 }
 
 /** Aggregate information about observed long tasks. */
 export interface LongTaskInfo {
   /** Number of long task entries observed since the collector started. */
-  count: number
+  count: number;
   /** Duration in milliseconds of the most recent long task, or null before any long task is observed. */
-  lastDuration: number | null
+  lastDuration: number | null;
 }
 
 /** Current browser performance metrics and retained histories. */
 export interface PerformanceSnapshot {
   /** Latest frames-per-second measurement. */
-  fps: number
+  fps: number;
   /** Recent FPS measurements, capped by `maxHistory`. */
-  fpsHistory: number[]
+  fpsHistory: number[];
   /** Current heap memory information, or null outside browsers that expose `performance.memory`. */
-  memory: MemoryInfo | null
+  memory: MemoryInfo | null;
   /** Recent memory usage percentages, capped by `maxHistory`. */
-  memoryHistory: number[]
+  memoryHistory: number[];
   /** Long task counter and last observed duration. */
-  longTasks: LongTaskInfo
+  longTasks: LongTaskInfo;
   /** Cumulative Layout Shift value collected from layout-shift performance entries. */
-  cls: number
+  cls: number;
 }
 
 /** Configuration for the performance collector. */
 export interface PerformanceCollectorConfig {
   /** Maximum number of FPS and memory history points to retain. */
-  maxHistory: number
+  maxHistory: number;
 }
 
 /** Public API exposed by the performance collector. */
 export interface IPerformanceCollector {
   /** Signal containing the latest FPS value. */
-  fps: SSignal<number>
+  fps: SSignal<number>;
   /** Signal containing retained FPS history. */
-  fpsHistory: SSignal<number[]>
+  fpsHistory: SSignal<number[]>;
   /** Signal containing current memory information, or null when unavailable. */
-  memory: SSignal<MemoryInfo | null>
+  memory: SSignal<MemoryInfo | null>;
   /** Signal containing retained memory percentage history. */
-  memoryHistory: SSignal<number[]>
+  memoryHistory: SSignal<number[]>;
   /** Signal containing long task summary information. */
-  longTasks: SSignal<LongTaskInfo>
+  longTasks: SSignal<LongTaskInfo>;
   /** Signal containing cumulative layout shift. */
-  cls: SSignal<number>
+  cls: SSignal<number>;
   /** Signal containing the complete performance snapshot. */
-  snapshot: SSignal<PerformanceSnapshot>
+  snapshot: SSignal<PerformanceSnapshot>;
   /** Clears retained FPS and memory histories without resetting current metric values. */
-  clearHistory(): void
+  clearHistory(): void;
   /** Starts collecting supported browser performance metrics. */
-  start(): void
+  start(): void;
   /** Stops animation frame loops, intervals, and performance observers. */
-  stop(): void
+  stop(): void;
   /** Stops the collector and releases owned resources. */
-  destroy(): void
+  destroy(): void;
 }

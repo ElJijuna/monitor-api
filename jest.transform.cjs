@@ -1,4 +1,4 @@
-const ts = require('typescript')
+const ts = require('typescript');
 
 module.exports = {
   process(sourceText, sourcePath) {
@@ -8,8 +8,8 @@ module.exports = {
         target: ts.ScriptTarget.ES2020,
       },
       fileName: sourcePath,
-    })
+    });
 
-    return { code: output.outputText }
+    return { code: output.outputText };
   },
-}
+};

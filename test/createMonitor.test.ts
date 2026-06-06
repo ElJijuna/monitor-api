@@ -1,43 +1,43 @@
-import { jest } from '@jest/globals'
-import { createMonitor } from '../src/index'
-import type { MonitorSnapshot } from '../src/core/types'
+import { jest } from '@jest/globals';
+import type { MonitorSnapshot } from '../src/core/types';
+import { createMonitor } from '../src/index';
 
 afterEach(() => {
-  Reflect.deleteProperty(globalThis, 'window')
-  jest.useRealTimers()
-})
+  Reflect.deleteProperty(globalThis, 'window');
+  jest.useRealTimers();
+});
 
 test('createMonitor exposes a combined snapshot and subscription API', () => {
-  const monitor = createMonitor()
-  const snapshots: MonitorSnapshot[] = []
-  const unsubscribe = monitor.subscribe((snapshot) => snapshots.push(snapshot))
+  const monitor = createMonitor();
+  const snapshots: MonitorSnapshot[] = [];
+  const unsubscribe = monitor.subscribe((snapshot) => snapshots.push(snapshot));
 
-  monitor.events.clearLog()
+  monitor.events.clearLog();
 
   expect(monitor.getSnapshot()).toMatchObject({
     performance: expect.any(Object),
     network: expect.any(Object),
     react: expect.any(Object),
     events: { entries: [], byLabel: {} },
-  })
-  expect(snapshots).toHaveLength(1)
+  });
+  expect(snapshots).toHaveLength(1);
 
-  unsubscribe()
-  monitor.destroy()
-})
+  unsubscribe();
+  monitor.destroy();
+});
 
 test('createMonitor is safe to construct and start without browser globals', () => {
-  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'window');
 
-  const monitor = createMonitor()
+  const monitor = createMonitor();
 
-  expect(() => monitor.start()).not.toThrow()
-  expect(() => monitor.stop()).not.toThrow()
-  expect(() => monitor.destroy()).not.toThrow()
-})
+  expect(() => monitor.start()).not.toThrow();
+  expect(() => monitor.stop()).not.toThrow();
+  expect(() => monitor.destroy()).not.toThrow();
+});
 
 test('production reporting does not start during construction', () => {
-  jest.useFakeTimers()
+  jest.useFakeTimers();
 
   const monitor = createMonitor({
     env: 'production',
@@ -45,18 +45,19 @@ test('production reporting does not start during construction', () => {
       endpoint: '/monitor',
       interval: 1000,
     },
-  })
+  });
 
-  expect(jest.getTimerCount()).toBe(0)
+  expect(jest.getTimerCount()).toBe(0);
 
-  monitor.destroy()
-})
+  monitor.destroy();
+});
 
 test('production reporting does not start without fetch', () => {
-  jest.useFakeTimers()
+  jest.useFakeTimers();
 
-  const originalFetch = globalThis.fetch
-  Reflect.deleteProperty(globalThis, 'fetch')
+  const originalFetch = globalThis.fetch;
+
+  Reflect.deleteProperty(globalThis, 'fetch');
 
   const monitor = createMonitor({
     env: 'production',
@@ -64,15 +65,15 @@ test('production reporting does not start without fetch', () => {
       endpoint: '/monitor',
       interval: 1000,
     },
-  })
+  });
 
-  monitor.start()
+  monitor.start();
 
-  expect(jest.getTimerCount()).toBe(0)
+  expect(jest.getTimerCount()).toBe(0);
 
-  monitor.destroy()
+  monitor.destroy();
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: originalFetch,
-  })
-})
+  });
+});

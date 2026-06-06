@@ -1,9 +1,9 @@
 export {
-  useSignal,
-  useMonitor,
-  usePerformance,
-  useNetwork,
-  useReact,
   useEvents,
+  useMonitor,
+  useNetwork,
+  usePerformance,
+  useReact,
+  useSignal,
   useWebVitals,
-} from './hooks/index'
+} from './hooks/index';
