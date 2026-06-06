@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/ElJijuna/monitor-api/compare/v1.1.0...v1.1.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* update TypeScript and type definitions for compatibility ([2d5735d](https://github.com/ElJijuna/monitor-api/commit/2d5735dbf2d43ba521d524c4d55a4bd009d53389))
+
 # [1.1.0](https://github.com/ElJijuna/monitor-api/compare/v1.0.1...v1.1.0) (2026-05-29)
 
 
