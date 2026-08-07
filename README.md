@@ -474,8 +474,10 @@ monitor.start()
 ```
 
 Production reporting is intentionally best-effort: failed report requests are
-ignored so monitoring never breaks the application. If `fetch` is unavailable,
-the reporter does not start.
+ignored so monitoring never breaks the application. Errors from `transform`,
+serialization, and synchronous transport setup are contained as well. The
+reporter keeps at most one request in flight and skips interval ticks while that
+request is pending. If `fetch` is unavailable, the reporter does not start.
 
 Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
 snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;

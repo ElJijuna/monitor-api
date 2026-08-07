@@ -181,3 +181,131 @@ test('production reporting uses transform as an explicit opt-in to custom data',
     });
   }
 });
+
+test('production reporting contains transform errors and keeps running', () => {
+  jest.useFakeTimers();
+
+  const originalFetch = globalThis.fetch;
+  const fetchMock = jest.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(),
+  );
+  const transform = jest.fn(() => {
+    throw new Error('transform failed');
+  });
+
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: fetchMock,
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+      transform,
+    },
+  });
+
+  try {
+    monitor.start();
+
+    expect(() => jest.advanceTimersByTime(1000)).not.toThrow();
+    expect(() => jest.advanceTimersByTime(1000)).not.toThrow();
+    expect(transform).toHaveBeenCalledTimes(2);
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
+  }
+});
+
+test('production reporting contains serialization errors', () => {
+  jest.useFakeTimers();
+
+  const originalFetch = globalThis.fetch;
+  const fetchMock = jest.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(),
+  );
+  const circular: Record<string, unknown> = {};
+
+  circular.self = circular;
+
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: fetchMock,
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+      transform: () => circular,
+    },
+  });
+
+  try {
+    monitor.start();
+
+    expect(() => jest.advanceTimersByTime(1000)).not.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
+  }
+});
+
+test('production reporting does not overlap pending requests', async () => {
+  jest.useFakeTimers();
+
+  const originalFetch = globalThis.fetch;
+
+  let resolveFetch!: (response: Response) => void;
+  const pendingResponse = new Promise<Response>((resolve) => {
+    resolveFetch = resolve;
+  });
+  const fetchMock = jest.fn((_input: RequestInfo | URL, _init?: RequestInit) => pendingResponse);
+
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: fetchMock,
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+    },
+  });
+
+  try {
+    monitor.start();
+
+    jest.advanceTimersByTime(3000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveFetch(new Response());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    jest.advanceTimersByTime(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
+  }
+});

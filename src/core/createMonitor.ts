@@ -164,6 +164,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   };
 
   let reporterInterval: ReturnType<typeof setInterval> | null = null;
+  let reporterInFlight = false;
 
   function startReporter() {
     if (env !== 'production' || !config.report || reporterInterval !== null) {
@@ -177,14 +178,29 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     const { endpoint, interval, transform } = config.report;
 
     reporterInterval = setInterval(() => {
-      const snap = signal.value;
-      const payload = transform ? transform(snap) : createDefaultReportPayload(snap);
+      if (reporterInFlight) {
+        return;
+      }
 
-      fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(() => {});
+      try {
+        const snap = signal.value;
+        const payload = transform ? transform(snap) : createDefaultReportPayload(snap);
+        const body = JSON.stringify(payload);
+
+        reporterInFlight = true;
+        void fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        })
+          .catch(() => {})
+          .finally(() => {
+            reporterInFlight = false;
+          });
+      } catch {
+        reporterInFlight = false;
+        // Monitoring must never break the host application.
+      }
     }, interval);
   }
 
