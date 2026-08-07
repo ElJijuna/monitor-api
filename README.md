@@ -173,6 +173,10 @@ uses a valid `Content-Length` header when available; XHR can also use the
 `byteLength` of an already-materialized `ArrayBuffer`. Otherwise it reports `0`
 to represent an unknown size.
 
+While the collector is running, `window5s` updates when requests enter and leave
+the five-second window. A one-shot timer targets only the next expiration; it is
+released by `stop()`, `destroy()`, or `clearLog()`.
+
 ```ts
 monitor.start()
 

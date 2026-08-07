@@ -8,6 +8,8 @@ import type {
   NetworkWindow5s,
 } from '../core/types';
 
+const NETWORK_WINDOW_MS = 5000;
+
 let _idCounter = 0;
 const uid = () => `net-${Date.now()}-${++_idCounter}`;
 
@@ -253,16 +255,19 @@ export class NetworkCollector implements INetworkCollector {
   readonly onRequest: SSignal<NetworkEntry | null>;
 
   #entries: SSignal<NetworkEntry[]>;
+  #windowClock: SSignal<number>;
   #filter: (url: string) => boolean;
   #teardown: (() => void) | null = null;
+  #windowExpiry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: NetworkCollectorConfig) {
     this.#filter = config.filter ?? (() => true);
     this.#entries = new SSignal<NetworkEntry[]>([]);
+    this.#windowClock = new SSignal(Date.now());
     this.onRequest = new SSignal<NetworkEntry | null>(null);
 
     this.snapshot = computed(
-      [this.#entries],
+      [this.#entries, this.#windowClock],
       ([entries]): NetworkSnapshot => ({
         entries,
         window5s: this.#computeWindow5s(entries),
@@ -280,11 +285,14 @@ export class NetworkCollector implements INetworkCollector {
     }
 
     this.#teardown = subscribeToNetwork((entry) => this.#record(entry));
+    this.#windowClock.value = Date.now();
+    this.#scheduleWindowExpiry();
   }
 
   stop(): void {
     this.#teardown?.();
     this.#teardown = null;
+    this.#clearWindowExpiry();
   }
 
   destroy(): void {
@@ -293,6 +301,7 @@ export class NetworkCollector implements INetworkCollector {
 
   clearLog(): void {
     this.#entries.value = [];
+    this.#clearWindowExpiry();
   }
 
   setFilter(fn: (url: string) => boolean): void {
@@ -307,10 +316,47 @@ export class NetworkCollector implements INetworkCollector {
     this.#entries.value = (prev: NetworkEntry[]) =>
       appendHistory(prev, [entry], this.config.maxHistory);
     this.onRequest.value = entry;
+    this.#scheduleWindowExpiry();
+  }
+
+  #clearWindowExpiry(): void {
+    if (this.#windowExpiry !== null) {
+      clearTimeout(this.#windowExpiry);
+      this.#windowExpiry = null;
+    }
+  }
+
+  #scheduleWindowExpiry(): void {
+    this.#clearWindowExpiry();
+
+    if (!this.#teardown) {
+      return;
+    }
+
+    const now = Date.now();
+    const nextExpiration = this.#entries.value.reduce<number | null>((next, entry) => {
+      const expiration = entry.timestamp + NETWORK_WINDOW_MS + 1;
+
+      if (expiration <= now) {
+        return next;
+      }
+
+      return next === null ? expiration : Math.min(next, expiration);
+    }, null);
+
+    if (nextExpiration === null) {
+      return;
+    }
+
+    this.#windowExpiry = setTimeout(() => {
+      this.#windowExpiry = null;
+      this.#windowClock.value = Date.now();
+      this.#scheduleWindowExpiry();
+    }, nextExpiration - now);
   }
 
   #computeWindow5s(entries: NetworkEntry[]): NetworkWindow5s {
-    const cutoff = Date.now() - 5000;
+    const cutoff = Date.now() - NETWORK_WINDOW_MS;
     const recent = entries.filter((e) => e.timestamp >= cutoff);
 
     if (recent.length === 0) {

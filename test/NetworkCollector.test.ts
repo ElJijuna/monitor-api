@@ -81,6 +81,120 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
   monitor.destroy();
 });
 
+test('NetworkCollector expires window5s without new network traffic', async () => {
+  let now = Date.parse('2026-08-07T12:00:00.000Z');
+  let expireWindow: (() => void) | null = null;
+  const dateNow = jest.spyOn(Date, 'now').mockImplementation(() => now);
+  const originalSetTimeout = globalThis.setTimeout;
+  const schedule = jest.fn((handler: TimerHandler) => {
+    if (typeof handler === 'function') {
+      expireWindow = handler as () => void;
+    }
+
+    return 1 as unknown as ReturnType<typeof setTimeout>;
+  });
+
+  Object.defineProperty(globalThis, 'setTimeout', {
+    configurable: true,
+    writable: true,
+    value: schedule as unknown as typeof setTimeout,
+  });
+
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch };
+
+    await testWindow.fetch('/expires');
+    expect(monitor.network.snapshot.value.window5s.count).toBe(1);
+
+    now += 5001;
+    (expireWindow as (() => void) | null)?.();
+
+    expect(monitor.network.snapshot.value.window5s).toEqual({
+      count: 0,
+      avgLatency: 0,
+      totalPayload: 0,
+      errorRate: 0,
+    });
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'setTimeout', {
+      configurable: true,
+      writable: true,
+      value: originalSetTimeout,
+    });
+    dateNow.mockRestore();
+  }
+});
+
+test('NetworkCollector cancels the pending window expiration when stopped', async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timerHandle = 1 as unknown as ReturnType<typeof setTimeout>;
+  const schedule = jest.fn(() => timerHandle);
+  const cancel: typeof clearTimeout = jest.fn();
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+
+  Object.defineProperty(globalThis, 'setTimeout', {
+    configurable: true,
+    writable: true,
+    value: schedule as unknown as typeof setTimeout,
+  });
+  Object.defineProperty(globalThis, 'clearTimeout', {
+    configurable: true,
+    writable: true,
+    value: cancel,
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch };
+
+    await testWindow.fetch('/pending-expiration');
+    expect(schedule).toHaveBeenCalledTimes(1);
+
+    monitor.stop();
+    expect(cancel).toHaveBeenCalledWith(timerHandle);
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'setTimeout', {
+      configurable: true,
+      writable: true,
+      value: originalSetTimeout,
+    });
+    Object.defineProperty(globalThis, 'clearTimeout', {
+      configurable: true,
+      writable: true,
+      value: originalClearTimeout,
+    });
+  }
+});
+
 test('NetworkCollector measures Content-Length without cloning or changing the response', async () => {
   const response = new Response('payload', {
     headers: { 'Content-Length': '7' },
