@@ -477,6 +477,18 @@ Production reporting is intentionally best-effort: failed report requests are
 ignored so monitoring never breaks the application. If `fetch` is unavailable,
 the reporter does not start.
 
+Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
+snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;
+the five-second network aggregate; React commit counts; the retained custom-event
+count; and Web Vital values, deltas, and ratings. It does not send request URLs,
+errors, histories, event labels or data, component names, Web Vital IDs, or
+navigation types. The reporter endpoint is also excluded from NetworkCollector,
+while any configured network filter continues to apply.
+
+`transform` is an explicit opt-in to a custom payload and receives the full
+snapshot, including potentially sensitive application data. Redact secrets and
+bound the returned payload before enabling it in production.
+
 ---
 
 ## Collector config

@@ -16,6 +16,60 @@ import type {
   WebVitalsCollectorConfig,
 } from './types';
 
+function createDefaultReportPayload(snap: MonitorSnapshot) {
+  const summarizeWebVital = (metric: MonitorSnapshot['webVitals']['cls']) =>
+    metric
+      ? {
+          value: metric.value,
+          delta: metric.delta,
+          rating: metric.rating,
+        }
+      : null;
+
+  return {
+    timestamp: snap.timestamp,
+    performance: {
+      fps: snap.performance.fps,
+      memoryPercent: snap.performance.memory?.percent ?? null,
+      longTasks: snap.performance.longTasks,
+      cls: snap.performance.cls,
+    },
+    network: {
+      window5s: snap.network.window5s,
+    },
+    react: {
+      totalCommits: snap.react.totalCommits,
+      slowRenderCount: snap.react.slowComponents.length,
+    },
+    events: {
+      count: snap.events.entries.length,
+    },
+    webVitals: {
+      cls: summarizeWebVital(snap.webVitals.cls),
+      fcp: summarizeWebVital(snap.webVitals.fcp),
+      inp: summarizeWebVital(snap.webVitals.inp),
+      lcp: summarizeWebVital(snap.webVitals.lcp),
+      ttfb: summarizeWebVital(snap.webVitals.ttfb),
+    },
+  };
+}
+
+function excludeReportEndpoint(
+  config: NetworkCollectorConfig | false,
+  report: MonitorConfig['report'],
+): NetworkCollectorConfig | false {
+  if (config === false || !report) {
+    return config;
+  }
+
+  const userFilter = config.filter;
+
+  return {
+    ...config,
+    filter: (url) => url !== report.endpoint && (userFilter?.(url) ?? true),
+  };
+}
+
 function resolveCollector<T>(name: CollectorName, config: MonitorConfig, defaults: T): T | false {
   const { collectors } = config;
 
@@ -71,7 +125,10 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true };
 
   const perfCfg = resolveCollector('performance', config, perfConfig);
-  const netCfg = resolveCollector('network', config, netConfig);
+  const netCfg = excludeReportEndpoint(
+    resolveCollector('network', config, netConfig),
+    env === 'production' ? config.report : undefined,
+  );
   const reactCfg = resolveCollector('react', config, reactConfig);
   const eventsCfg = resolveCollector('events', config, eventsConfig);
   const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig);
@@ -121,7 +178,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
 
     reporterInterval = setInterval(() => {
       const snap = signal.value;
-      const payload = transform ? transform(snap) : snap;
+      const payload = transform ? transform(snap) : createDefaultReportPayload(snap);
 
       fetch(endpoint, {
         method: 'POST',

@@ -31,7 +31,10 @@ export interface ProductionReportConfig {
   endpoint: string;
   /** Reporting interval in milliseconds. */
   interval: number;
-  /** Optional mapper used to reduce or reshape the payload before it is posted. */
+  /**
+   * Optional mapper used to customize the payload before it is posted. It receives the full,
+   * potentially sensitive snapshot; without it, the reporter sends only bounded aggregates.
+   */
   transform?: (snap: MonitorSnapshot) => unknown;
 }
 
