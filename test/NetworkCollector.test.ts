@@ -5,6 +5,7 @@ class FakeXMLHttpRequest {
   static lastInstance: FakeXMLHttpRequest | null = null;
 
   listeners = new Map<string, () => void>();
+  responseHeaders = new Map<string, string>();
   response = '';
   status = 200;
 
@@ -20,6 +21,10 @@ class FakeXMLHttpRequest {
 
   addEventListener(name: string, listener: () => void): void {
     this.listeners.set(name, listener);
+  }
+
+  getResponseHeader(name: string): string | null {
+    return this.responseHeaders.get(name.toLowerCase()) ?? null;
   }
 }
 
@@ -74,6 +79,125 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
   expect(snapshot.window5s.errorRate).toBe(0);
 
   monitor.destroy();
+});
+
+test('NetworkCollector measures Content-Length without cloning or changing the response', async () => {
+  const response = new Response('payload', {
+    headers: { 'Content-Length': '7' },
+  });
+  const clone = jest.spyOn(response, 'clone').mockImplementation(() => {
+    throw new Error('clone failed');
+  });
+  const fetch: typeof globalThis.fetch = jest.fn(async () => response);
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch };
+    const returnedResponse = await testWindow.fetch('/large-response');
+
+    expect(returnedResponse).toBe(response);
+    expect(clone).not.toHaveBeenCalled();
+    expect(monitor.network.snapshot.value.entries).toEqual([
+      expect.objectContaining({
+        url: '/large-response',
+        status: 200,
+        payloadSize: 7,
+        error: null,
+      }),
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector reports zero when Content-Length is unavailable or invalid', async () => {
+  const responseWithoutSize = new Response('unknown');
+  const responseWithInvalidSize = new Response('unknown', {
+    headers: { 'Content-Length': 'invalid' },
+  });
+  const cloneWithoutSize = jest.spyOn(responseWithoutSize, 'clone');
+  const cloneWithInvalidSize = jest.spyOn(responseWithInvalidSize, 'clone');
+  const fetch: typeof globalThis.fetch = jest
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(responseWithoutSize)
+    .mockResolvedValueOnce(responseWithInvalidSize);
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch };
+
+    await testWindow.fetch('/missing-size');
+    await testWindow.fetch('/invalid-size');
+
+    expect(cloneWithoutSize).not.toHaveBeenCalled();
+    expect(cloneWithInvalidSize).not.toHaveBeenCalled();
+    expect(monitor.network.snapshot.value.entries.map((entry) => entry.payloadSize)).toEqual([
+      0, 0,
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector measures XHR Content-Length without copying its text response', () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const xhr = new XMLHttpRequest();
+
+    (xhr as unknown as FakeXMLHttpRequest).response = 'do not measure this body';
+    (xhr as unknown as FakeXMLHttpRequest).responseHeaders.set('content-length', '4096');
+    xhr.open('GET', '/large-xhr');
+    xhr.send();
+
+    expect(monitor.network.snapshot.value.entries).toEqual([
+      expect.objectContaining({
+        url: '/large-xhr',
+        status: 200,
+        payloadSize: 4096,
+        error: null,
+      }),
+    ]);
+  } finally {
+    monitor.destroy();
+  }
 });
 
 test('NetworkCollector retains no history when maxHistory is zero', async () => {

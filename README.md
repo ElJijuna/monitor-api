@@ -168,6 +168,11 @@ Intercepts `fetch` and `XMLHttpRequest` transparently. `stop()`/`destroy()`
 restore the original `fetch`, `XMLHttpRequest.prototype.open`, and
 `XMLHttpRequest.prototype.send` implementations.
 
+Response bodies are never cloned or consumed for instrumentation. `payloadSize`
+uses a valid `Content-Length` header when available; XHR can also use the
+`byteLength` of an already-materialized `ArrayBuffer`. Otherwise it reports `0`
+to represent an unknown size.
+
 ```ts
 monitor.start()
 
@@ -202,7 +207,7 @@ interface NetworkEntry {
   method: string          // 'GET' | 'POST' | ...
   status: number          // 0 if network error
   latency: number         // ms
-  payloadSize: number     // response bytes
+  payloadSize: number     // known response bytes; 0 when unknown
   requestSize: number     // request body bytes
   initiator: 'fetch' | 'xhr'
   timestamp: number       // Date.now()

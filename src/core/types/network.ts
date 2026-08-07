@@ -12,7 +12,7 @@ export interface NetworkEntry {
   status: number;
   /** Request latency in milliseconds. */
   latency: number;
-  /** Response payload size in bytes when it can be measured. */
+  /** Known response payload size in bytes, or 0 when unavailable without reading the body. */
   payloadSize: number;
   /** Request body size in bytes when it can be estimated. */
   requestSize: number;

@@ -57,6 +57,38 @@ function estimateBodySize(body: BodyInit | null | undefined): number {
   return 0;
 }
 
+function parseContentLength(contentLength: string | null): number | null {
+  if (contentLength === null || !/^\d+$/.test(contentLength)) {
+    return null;
+  }
+
+  const size = Number(contentLength);
+
+  return Number.isSafeInteger(size) ? size : null;
+}
+
+function getFetchResponseSize(response: Response): number {
+  try {
+    return parseContentLength(response.headers.get('content-length')) ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getXhrResponseSize(xhr: XMLHttpRequest): number {
+  try {
+    const contentLength = parseContentLength(xhr.getResponseHeader('content-length'));
+
+    if (contentLength !== null) {
+      return contentLength;
+    }
+
+    return xhr.response instanceof ArrayBuffer ? xhr.response.byteLength : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function patchFetch(): void {
   originalFetch = window.fetch;
   const callOriginal = originalFetch.bind(window);
@@ -82,37 +114,18 @@ function patchFetch(): void {
       const response = await callOriginal(input, init);
       const latency = performance.now() - start;
 
-      response
-        .clone()
-        .arrayBuffer()
-        .then((buf) => {
-          emitNetworkEntry({
-            id: uid(),
-            url,
-            method,
-            status: response.status,
-            latency: Math.round(latency),
-            payloadSize: buf.byteLength,
-            requestSize,
-            initiator: 'fetch',
-            timestamp: Date.now(),
-            error: null,
-          });
-        })
-        .catch(() => {
-          emitNetworkEntry({
-            id: uid(),
-            url,
-            method,
-            status: response.status,
-            latency: Math.round(latency),
-            payloadSize: 0,
-            requestSize,
-            initiator: 'fetch',
-            timestamp: Date.now(),
-            error: null,
-          });
-        });
+      emitNetworkEntry({
+        id: uid(),
+        url,
+        method,
+        status: response.status,
+        latency: Math.round(latency),
+        payloadSize: getFetchResponseSize(response),
+        requestSize,
+        initiator: 'fetch',
+        timestamp: Date.now(),
+        error: null,
+      });
 
       return response;
     } catch (err) {
@@ -165,20 +178,13 @@ function patchXhr(): void {
     const method = this.__mon_method ?? 'GET';
 
     this.addEventListener('loadend', () => {
-      const payloadSize =
-        typeof this.response === 'string'
-          ? new Blob([this.response]).size
-          : this.response instanceof ArrayBuffer
-            ? this.response.byteLength
-            : 0;
-
       emitNetworkEntry({
         id: uid(),
         url,
         method,
         status: this.status,
         latency: Math.round(performance.now() - start),
-        payloadSize,
+        payloadSize: getXhrResponseSize(this),
         requestSize,
         initiator: 'xhr',
         timestamp: Date.now(),
