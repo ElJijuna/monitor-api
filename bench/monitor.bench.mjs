@@ -145,6 +145,28 @@ function fiberList(count) {
   return root;
 }
 
+function fiberSiblings(count) {
+  const root = fiberFor(function Root() {}, 1);
+  let current = null;
+
+  for (let i = 0; i < count; i++) {
+    const component = Object.defineProperty(function Component() {}, 'name', {
+      value: `BenchSibling${i}`,
+    });
+    const sibling = fiberFor(component, i % 5);
+
+    if (current) {
+      current.sibling = sibling;
+    } else {
+      root.child = sibling;
+    }
+
+    current = sibling;
+  }
+
+  return root;
+}
+
 function runBenchmarks() {
   const results = [];
 
@@ -192,6 +214,18 @@ function runBenchmarks() {
   results.push(
     bench('React commit with 50 fibers', () => {
       hook.onCommitFiberRoot(1, root);
+    }),
+  );
+  const deepRoot = { current: fiberList(1_000) };
+  results.push(
+    bench('React commit with 1,000 deep fibers', () => {
+      hook.onCommitFiberRoot(1, deepRoot);
+    }),
+  );
+  const wideRoot = { current: fiberSiblings(1_000) };
+  results.push(
+    bench('React commit with 1,000 wide fibers', () => {
+      hook.onCommitFiberRoot(1, wideRoot);
     }),
   );
   reactMonitor.destroy();

@@ -1,6 +1,6 @@
 import type SSignal from 'ssignal';
 
-/** React render phase inferred from Fiber commit metadata. */
+/** React render phase observed from commit state or the dedicated unmount hook. */
 export type RenderPhase = 'mount' | 'update' | 'unmount';
 
 /** One captured React component render entry. */
@@ -16,7 +16,7 @@ export interface RenderEntry {
   duration: number;
   /** Unix timestamp in milliseconds for when the commit was observed. */
   timestamp: number;
-  /** Render phase for this entry. */
+  /** Mount/update phase, or unmount when reported by the React DevTools hook. */
   type: RenderPhase;
   /** Monotonic id shared by all entries captured from the same commit. */
   commitId: number;
@@ -38,6 +38,8 @@ export interface ComponentStats {
 export interface ReactSnapshot {
   /** Number of commit batches captured since the collector was started or cleared. */
   totalCommits: number;
+  /** Number of commits whose Fiber traversal exceeded `maxFiberVisits`. */
+  truncatedCommits: number;
   /** Recent render entries, capped by `maxHistory`. */
   entries: RenderEntry[];
   /** Per-component statistics derived from retained entries. */
@@ -52,6 +54,10 @@ export interface ReactCollectorConfig {
   maxHistory: number;
   /** Duration in milliseconds used to classify a render as slow. */
   slowThreshold: number;
+  /** Includes fibers whose profiling duration is zero. Defaults to false. */
+  includeZeroDuration?: boolean;
+  /** Maximum fibers visited per commit. Defaults to 10,000; use Infinity to disable. */
+  maxFiberVisits?: number;
 }
 
 /** Public API exposed by the React collector. */

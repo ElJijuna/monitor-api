@@ -239,6 +239,7 @@ monitor.react.onCommit.subscribe((entry) => {
 // Full snapshot with per-component aggregation over retained history
 monitor.react.snapshot.subscribe((snap) => {
   console.log(`Total commits: ${snap.totalCommits}`)
+  console.log(`Truncated commits: ${snap.truncatedCommits}`)
 
   console.log('Slow components (>16ms):')
   snap.slowComponents.forEach((e) => {
@@ -257,6 +258,13 @@ monitor.react.setSlowThreshold(8)  // flag components slower than 8ms
 monitor.react.clearLog()
 ```
 
+Traversal is iterative and visits at most 10,000 fibers per commit by default.
+Set `maxFiberVisits` to another limit (`Infinity` disables the cap). Commits that
+reach the cap increment `truncatedCommits`. Fibers with `actualDuration <= 0` are
+ignored unless `includeZeroDuration: true` is configured. Unmounts come from the
+dedicated React DevTools hook rather than private Fiber flags. They remain in
+`entries`/`onCommit`, but do not inflate render aggregates or `slowComponents`.
+
 **Render entry shape:**
 
 ```ts
@@ -269,7 +277,9 @@ interface RenderEntry {
 }
 ```
 
-> **Tip:** `duration` is always `0` in production unless you use `react-dom/profiling`. In dev mode it's automatically available.
+> **Tip:** profiling duration is unavailable in standard production builds. Use
+> `react-dom/profiling` for production measurements, or opt into zero-duration
+> entries explicitly when only component/phase information is needed.
 
 ---
 
@@ -513,7 +523,11 @@ createMonitor({
   collectors: {
     performance: true,
     network: { filter: (url) => !url.includes('/analytics') },
-    react: { slowThreshold: 8 },   // default 16ms
+    react: {
+      slowThreshold: 8,            // default 16ms
+      maxFiberVisits: 10_000,      // default 10,000
+      includeZeroDuration: false,  // default false
+    },
     events: false,                  // disabled
     webVitals: { reportAllChanges: true },
   },

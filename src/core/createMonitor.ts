@@ -39,6 +39,7 @@ function createDefaultReportPayload(snap: MonitorSnapshot) {
     },
     react: {
       totalCommits: snap.react.totalCommits,
+      truncatedCommits: snap.react.truncatedCommits,
       slowRenderCount: snap.react.slowComponents.length,
     },
     events: {

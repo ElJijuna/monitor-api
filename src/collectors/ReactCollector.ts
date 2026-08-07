@@ -11,12 +11,10 @@ import type {
 
 // Minimal fiber types — only the fields we access
 interface Fiber {
-  tag: number;
   type: unknown;
   alternate: Fiber | null;
   child: Fiber | null;
   sibling: Fiber | null;
-  flags: number;
   actualDuration?: number;
 }
 
@@ -25,7 +23,12 @@ interface FiberRoot {
 }
 
 interface DevToolsHook {
-  onCommitFiberRoot: (rendererID: number, root: FiberRoot, priorityLevel?: unknown) => void;
+  onCommitFiberRoot: (
+    rendererID: number,
+    root: FiberRoot,
+    priorityLevel?: unknown,
+    didError?: boolean,
+  ) => void;
   isDisabled?: boolean;
   supportsFiber?: boolean;
   inject?: (renderer: unknown) => void;
@@ -36,7 +39,14 @@ interface DevToolsHook {
 }
 
 type ReactWindow = Window & { __REACT_DEVTOOLS_GLOBAL_HOOK__?: DevToolsHook };
-type ReactCommitListener = (root: FiberRoot) => void;
+interface ReactCommitListener {
+  onCommit(rendererID: number, root: FiberRoot): void;
+  onUnmount(rendererID: number, fiber: Fiber): void;
+}
+
+interface PendingUnmount {
+  component: string;
+}
 
 const reactCommitListeners = new Set<ReactCommitListener>();
 
@@ -44,6 +54,8 @@ let installedWindow: ReactWindow | null = null;
 let installedHook: DevToolsHook | null = null;
 let originalCommitHandler: DevToolsHook['onCommitFiberRoot'] | null = null;
 let patchedCommitHandler: DevToolsHook['onCommitFiberRoot'] | null = null;
+let originalUnmountHandler: DevToolsHook['onCommitFiberUnmount'] | null = null;
+let patchedUnmountHandler: DevToolsHook['onCommitFiberUnmount'] | null = null;
 
 function installReactHook(): void {
   const win = window as ReactWindow;
@@ -62,12 +74,26 @@ function installReactHook(): void {
 
   const hook = win.__REACT_DEVTOOLS_GLOBAL_HOOK__;
   const original = hook.onCommitFiberRoot;
+  const originalUnmount = hook.onCommitFiberUnmount;
 
-  const patched: DevToolsHook['onCommitFiberRoot'] = (rendererID, root, priorityLevel) => {
-    original.call(hook, rendererID, root, priorityLevel);
+  const patched: DevToolsHook['onCommitFiberRoot'] = (
+    rendererID,
+    root,
+    priorityLevel,
+    didError,
+  ) => {
+    original.call(hook, rendererID, root, priorityLevel, didError);
 
     for (const listener of reactCommitListeners) {
-      listener(root);
+      listener.onCommit(rendererID, root);
+    }
+  };
+
+  const patchedUnmount: NonNullable<DevToolsHook['onCommitFiberUnmount']> = (rendererID, fiber) => {
+    originalUnmount?.call(hook, rendererID, fiber);
+
+    for (const listener of reactCommitListeners) {
+      listener.onUnmount(rendererID, fiber);
     }
   };
 
@@ -75,7 +101,10 @@ function installReactHook(): void {
   installedHook = hook;
   originalCommitHandler = original;
   patchedCommitHandler = patched;
+  originalUnmountHandler = originalUnmount ?? null;
+  patchedUnmountHandler = patchedUnmount;
   hook.onCommitFiberRoot = patched;
+  hook.onCommitFiberUnmount = patchedUnmount;
 }
 
 function restoreReactHook(): void {
@@ -87,10 +116,23 @@ function restoreReactHook(): void {
     installedHook.onCommitFiberRoot = originalCommitHandler;
   }
 
+  if (
+    installedWindow?.__REACT_DEVTOOLS_GLOBAL_HOOK__ === installedHook &&
+    installedHook?.onCommitFiberUnmount === patchedUnmountHandler
+  ) {
+    if (originalUnmountHandler) {
+      installedHook.onCommitFiberUnmount = originalUnmountHandler;
+    } else {
+      Reflect.deleteProperty(installedHook, 'onCommitFiberUnmount');
+    }
+  }
+
   installedWindow = null;
   installedHook = null;
   originalCommitHandler = null;
   patchedCommitHandler = null;
+  originalUnmountHandler = null;
+  patchedUnmountHandler = null;
 }
 
 function subscribeToReactCommits(listener: ReactCommitListener): () => void {
@@ -116,16 +158,21 @@ function subscribeToReactCommits(listener: ReactCommitListener): () => void {
   };
 }
 
-const FunctionComponent = 0;
-const ClassComponent = 1;
-
-// React 19 fiber flags
-const Deletion = 0b000000000000000001000; // 8
-
 const REACT_MEMO_TYPE = Symbol.for('react.memo');
 const REACT_FORWARD_REF_TYPE = Symbol.for('react.forward_ref');
+const DEFAULT_MAX_FIBER_VISITS = 10_000;
 
-let _commitCounter = 0;
+function normalizeMaxFiberVisits(value: number | undefined): number {
+  if (value === Number.POSITIVE_INFINITY) {
+    return value;
+  }
+
+  if (value === undefined || !Number.isFinite(value)) {
+    return DEFAULT_MAX_FIBER_VISITS;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
 
 export class ReactCollector implements IReactCollector {
   readonly snapshot: SSignal<ReactSnapshot>;
@@ -133,22 +180,31 @@ export class ReactCollector implements IReactCollector {
 
   #entries: SSignal<RenderEntry[]>;
   #totalCommits: SSignal<number>;
+  #truncatedCommits: SSignal<number>;
   #slowThreshold: number;
+  #maxFiberVisits: number;
+  #commitCounter = 0;
+  #pendingUnmounts = new Map<number, PendingUnmount[]>();
   #teardown: (() => void) | null = null;
 
   constructor(private readonly config: ReactCollectorConfig) {
     this.#slowThreshold = config.slowThreshold;
+    this.#maxFiberVisits = normalizeMaxFiberVisits(config.maxFiberVisits);
     this.#entries = new SSignal<RenderEntry[]>([]);
     this.#totalCommits = new SSignal(0);
+    this.#truncatedCommits = new SSignal(0);
     this.onCommit = new SSignal<RenderEntry | null>(null);
 
     this.snapshot = computed(
-      [this.#entries, this.#totalCommits],
-      ([entries, totalCommits]): ReactSnapshot => ({
+      [this.#entries, this.#totalCommits, this.#truncatedCommits],
+      ([entries, totalCommits, truncatedCommits]): ReactSnapshot => ({
         totalCommits,
+        truncatedCommits,
         entries,
         byComponent: this.#computeByComponent(entries),
-        slowComponents: entries.filter((e) => e.duration >= this.#slowThreshold),
+        slowComponents: entries.filter(
+          (entry) => entry.type !== 'unmount' && entry.duration >= this.#slowThreshold,
+        ),
       }),
     );
   }
@@ -162,12 +218,16 @@ export class ReactCollector implements IReactCollector {
       return;
     }
 
-    this.#teardown = subscribeToReactCommits((root) => this.#handleCommit(root));
+    this.#teardown = subscribeToReactCommits({
+      onCommit: (rendererID, root) => this.#handleCommit(rendererID, root),
+      onUnmount: (rendererID, fiber) => this.#handleUnmount(rendererID, fiber),
+    });
   }
 
   stop(): void {
     this.#teardown?.();
     this.#teardown = null;
+    this.#pendingUnmounts.clear();
   }
 
   destroy(): void {
@@ -183,20 +243,35 @@ export class ReactCollector implements IReactCollector {
   clearLog(): void {
     this.#entries.value = [];
     this.#totalCommits.value = 0;
+    this.#truncatedCommits.value = 0;
+    this.#pendingUnmounts.clear();
   }
 
-  #handleCommit(root: FiberRoot): void {
-    const commitId = ++_commitCounter;
+  #handleCommit(rendererID: number, root: FiberRoot): void {
+    const commitId = ++this.#commitCounter;
     const now = Date.now();
-    const newEntries: RenderEntry[] = [];
+    const pendingUnmounts = this.#pendingUnmounts.get(rendererID) ?? [];
+    const newEntries: RenderEntry[] = pendingUnmounts.map(({ component }) => ({
+      component,
+      duration: 0,
+      timestamp: now,
+      type: 'unmount',
+      commitId,
+    }));
 
-    this.#walkFiber(root.current, newEntries, now, commitId);
+    this.#pendingUnmounts.delete(rendererID);
+
+    const truncated = this.#walkFiber(root.current, newEntries, now, commitId);
+
+    this.#totalCommits.value = (n: number) => n + 1;
+
+    if (truncated) {
+      this.#truncatedCommits.value = (n: number) => n + 1;
+    }
 
     if (newEntries.length === 0) {
       return;
     }
-
-    this.#totalCommits.value = (n: number) => n + 1;
 
     this.#entries.value = (prev: RenderEntry[]) =>
       appendHistory(prev, newEntries, this.config.maxHistory);
@@ -209,10 +284,31 @@ export class ReactCollector implements IReactCollector {
     }
   }
 
+  #handleUnmount(rendererID: number, fiber: Fiber): void {
+    const component = this.#getComponentName(fiber.type);
+
+    if (!component) {
+      return;
+    }
+
+    this.#pendingUnmounts.set(
+      rendererID,
+      appendHistory(
+        this.#pendingUnmounts.get(rendererID) ?? [],
+        [{ component }],
+        Math.max(1, this.config.maxHistory),
+      ),
+    );
+  }
+
   #computeByComponent(entries: RenderEntry[]): Record<string, ComponentStats> {
     const byComponent: Record<string, ComponentStats> = {};
 
     for (const entry of entries) {
+      if (entry.type === 'unmount') {
+        continue;
+      }
+
       const existing = byComponent[entry.component];
 
       if (existing) {
@@ -238,27 +334,47 @@ export class ReactCollector implements IReactCollector {
     return byComponent;
   }
 
-  #walkFiber(fiber: Fiber | null, entries: RenderEntry[], now: number, commitId: number): void {
+  #walkFiber(fiber: Fiber | null, entries: RenderEntry[], now: number, commitId: number): boolean {
     if (!fiber) {
-      return;
+      return false;
     }
 
-    if (fiber.tag === FunctionComponent || fiber.tag === ClassComponent) {
-      const name = this.#getComponentName(fiber.type);
+    const stack = [fiber];
 
-      if (name) {
+    let visited = 0;
+
+    while (stack.length > 0 && visited < this.#maxFiberVisits) {
+      const current = stack.pop();
+
+      if (!current) {
+        continue;
+      }
+
+      visited += 1;
+
+      const name = this.#getComponentName(current.type);
+      const duration = current.actualDuration ?? 0;
+
+      if (name && (duration > 0 || this.config.includeZeroDuration === true)) {
         entries.push({
           component: name,
-          duration: Math.round((fiber.actualDuration ?? 0) * 10) / 10,
+          duration: Math.round(duration * 10) / 10,
           timestamp: now,
-          type: this.#getPhase(fiber),
+          type: this.#getPhase(current),
           commitId,
         });
       }
+
+      if (current.sibling) {
+        stack.push(current.sibling);
+      }
+
+      if (current.child) {
+        stack.push(current.child);
+      }
     }
 
-    this.#walkFiber(fiber.child, entries, now, commitId);
-    this.#walkFiber(fiber.sibling, entries, now, commitId);
+    return stack.length > 0;
   }
 
   #getComponentName(type: unknown): string | null {
@@ -295,10 +411,6 @@ export class ReactCollector implements IReactCollector {
   }
 
   #getPhase(fiber: Fiber): RenderPhase {
-    if (fiber.flags & Deletion) {
-      return 'unmount';
-    }
-
     if (fiber.alternate === null) {
       return 'mount';
     }
