@@ -62,7 +62,7 @@ import { createMonitor } from 'monitor-api'
 
 const monitor = createMonitor({
   collectors: ['performance', 'network', 'react', 'events', 'webVitals'], // default: all
-  maxHistory: 120,       // data points kept per metric (default: 120)
+  maxHistory: 120,       // data points kept per metric; 0 disables history (default: 120)
   networkFilter: (url) => !url.includes('analytics'),        // optional
   env: 'development',    // 'development' | 'production' (default: 'development')
 })

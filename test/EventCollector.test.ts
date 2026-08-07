@@ -44,6 +44,30 @@ test('EventCollector keeps entries and label counts inside retained history', ()
   monitor.destroy();
 });
 
+test('EventCollector retains no history when maxHistory is zero', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: new EventTarget(),
+  });
+
+  const monitor = createMonitor({
+    maxHistory: 0,
+    collectors: { events: true },
+  });
+
+  monitor.start();
+  emitMonitorEvent('first');
+  emitMonitorEvent('latest');
+
+  expect(monitor.events.snapshot.value).toEqual({
+    entries: [],
+    byLabel: {},
+  });
+  expect(monitor.events.onEvent.value?.label).toBe('latest');
+
+  monitor.destroy();
+});
+
 test('EventCollector clearLog resets retained entries and label counts', () => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,

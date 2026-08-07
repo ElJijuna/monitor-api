@@ -106,6 +106,40 @@ test('PerformanceCollector clearHistory resets retained metric histories', () =>
   monitor.destroy();
 });
 
+test('PerformanceCollector retains no metric history when maxHistory is zero', () => {
+  const browser = installPerformanceBrowser();
+
+  Object.defineProperty(globalThis.performance, 'memory', {
+    configurable: true,
+    value: {
+      usedJSHeapSize: 10 * 1_048_576,
+      totalJSHeapSize: 20 * 1_048_576,
+      jsHeapSizeLimit: 50 * 1_048_576,
+    },
+  });
+
+  try {
+    const monitor = createMonitor({
+      maxHistory: 0,
+      collectors: { performance: true },
+    });
+
+    monitor.start();
+    browser.frames[0]?.(1_000);
+    browser.frames[1]?.(2_000);
+    jest.advanceTimersByTime(2_000);
+
+    expect(monitor.performance.fps.value).toBe(1);
+    expect(monitor.performance.fpsHistory.value).toEqual([]);
+    expect(monitor.performance.memory.value?.percent).toBe(20);
+    expect(monitor.performance.memoryHistory.value).toEqual([]);
+
+    monitor.destroy();
+  } finally {
+    browser.restore();
+  }
+});
+
 test('PerformanceCollector start is idempotent and stop releases its browser resources', () => {
   const browser = installPerformanceBrowser();
 

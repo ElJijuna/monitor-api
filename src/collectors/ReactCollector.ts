@@ -1,4 +1,5 @@
 import SSignal, { computed } from 'ssignal';
+import { appendHistory } from '../core/retainHistory';
 import type {
   ComponentStats,
   IReactCollector,
@@ -147,7 +148,7 @@ export class ReactCollector implements IReactCollector {
     this.#totalCommits.value = (n: number) => n + 1;
 
     this.#entries.value = (prev: RenderEntry[]) =>
-      [...prev, ...newEntries].slice(-this.config.maxHistory);
+      appendHistory(prev, newEntries, this.config.maxHistory);
 
     // Fire onCommit for the last entry of this batch
     const last = newEntries[newEntries.length - 1];

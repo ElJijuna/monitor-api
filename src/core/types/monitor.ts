@@ -57,7 +57,7 @@ export interface MonitorConfig {
       };
   /** Reserved for future sampling support. */
   sampleRate?: number;
-  /** Maximum number of retained entries per collector history. Defaults to 120. */
+  /** Maximum number of retained entries per collector history. Use 0 to disable history. Defaults to 120. */
   maxHistory?: number;
   /** Convenience filter applied to network request URLs. */
   networkFilter?: (url: string) => boolean;

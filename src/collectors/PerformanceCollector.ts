@@ -1,4 +1,5 @@
 import SSignal, { computed } from 'ssignal';
+import { appendHistory } from '../core/retainHistory';
 import type {
   IPerformanceCollector,
   LongTaskInfo,
@@ -116,7 +117,8 @@ export class PerformanceCollector implements IPerformanceCollector {
         this.#lastFpsTime = time;
         this.#frameCount = 0;
         this.fps.value = fps;
-        this.fpsHistory.value = (prev: number[]) => [...prev, fps].slice(-this.config.maxHistory);
+        this.fpsHistory.value = (prev: number[]) =>
+          appendHistory(prev, [fps], this.config.maxHistory);
       }
 
       this.#rafId = requestAnimationFrame(loop);
@@ -132,7 +134,7 @@ export class PerformanceCollector implements IPerformanceCollector {
       this.memory.value = mem;
       if (mem !== null) {
         this.memoryHistory.value = (prev: number[]) =>
-          [...prev, mem.percent].slice(-this.config.maxHistory);
+          appendHistory(prev, [mem.percent], this.config.maxHistory);
       }
     };
 

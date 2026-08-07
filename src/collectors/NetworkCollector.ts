@@ -1,4 +1,5 @@
 import SSignal, { computed } from 'ssignal';
+import { appendHistory } from '../core/retainHistory';
 import type {
   INetworkCollector,
   NetworkCollectorConfig,
@@ -86,7 +87,8 @@ export class NetworkCollector implements INetworkCollector {
       return;
     }
 
-    this.#entries.value = (prev: NetworkEntry[]) => [...prev, entry].slice(-this.config.maxHistory);
+    this.#entries.value = (prev: NetworkEntry[]) =>
+      appendHistory(prev, [entry], this.config.maxHistory);
     this.onRequest.value = entry;
   }
 

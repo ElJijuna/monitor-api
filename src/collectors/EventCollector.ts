@@ -1,4 +1,5 @@
 import SSignal, { computed } from 'ssignal';
+import { appendHistory } from '../core/retainHistory';
 import type {
   EventCollectorConfig,
   EventSnapshot,
@@ -81,7 +82,8 @@ export class EventCollector implements IEventCollector {
       timestamp: Date.now(),
     };
 
-    this.#entries.value = (prev: MonitorEvent[]) => [...prev, event].slice(-this.config.maxHistory);
+    this.#entries.value = (prev: MonitorEvent[]) =>
+      appendHistory(prev, [event], this.config.maxHistory);
 
     this.onEvent.value = event;
   }

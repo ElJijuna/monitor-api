@@ -1,6 +1,7 @@
 import SSignal, { computed } from 'ssignal';
 import type { MetricType } from 'web-vitals';
 import { onCLS, onFCP, onINP, onLCP, onTTFB } from 'web-vitals';
+import { appendHistory } from '../core/retainHistory';
 import type {
   IWebVitalsCollector,
   WebVitalMetric,
@@ -88,7 +89,7 @@ export class WebVitalsCollector implements IWebVitalsCollector {
     this.#snapshot.value = (prev: WebVitalsSnapshot): WebVitalsSnapshot => ({
       ...prev,
       [nextMetric.name.toLowerCase()]: nextMetric,
-      entries: [...prev.entries, nextMetric].slice(-this.config.maxHistory),
+      entries: appendHistory(prev.entries, [nextMetric], this.config.maxHistory),
     });
     this.onMetric.value = nextMetric;
   }

@@ -89,6 +89,33 @@ test('React byComponent is derived from retained history', () => {
   monitor.destroy();
 });
 
+test('ReactCollector retains no render history when maxHistory is zero', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  function Component() {}
+
+  const monitor = createMonitor({
+    maxHistory: 0,
+    collectors: { react: true },
+  });
+
+  monitor.start();
+  commit(Component, 20);
+
+  expect(monitor.react.snapshot.value).toEqual({
+    totalCommits: 1,
+    entries: [],
+    byComponent: {},
+    slowComponents: [],
+  });
+  expect(monitor.react.onCommit.value?.component).toBe('Component');
+
+  monitor.destroy();
+});
+
 test('ReactCollector start is idempotent', () => {
   const original = jest.fn();
 

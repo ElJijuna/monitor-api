@@ -62,6 +62,27 @@ test('WebVitalsCollector records latest metrics and retained entries', () => {
   monitor.destroy();
 });
 
+test('WebVitalsCollector retains no metric history when maxHistory is zero', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  const monitor = createMonitor({
+    maxHistory: 0,
+    collectors: { webVitals: true },
+  });
+
+  monitor.start();
+  callbacks.get('CLS')?.(metric('CLS', 0.01));
+
+  expect(monitor.webVitals.snapshot.value.cls?.value).toBe(0.01);
+  expect(monitor.webVitals.snapshot.value.entries).toEqual([]);
+  expect(monitor.webVitals.onMetric.value?.name).toBe('CLS');
+
+  monitor.destroy();
+});
+
 test('WebVitalsCollector start is idempotent and stop ignores future reports', () => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,

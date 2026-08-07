@@ -76,6 +76,39 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
   monitor.destroy();
 });
 
+test('NetworkCollector retains no history when maxHistory is zero', async () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({
+    maxHistory: 0,
+    collectors: { network: true },
+  });
+
+  monitor.start();
+
+  const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch };
+
+  await testWindow.fetch('/latest');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(monitor.network.snapshot.value).toEqual({
+    entries: [],
+    window5s: { count: 0, avgLatency: 0, totalPayload: 0, errorRate: 0 },
+  });
+  expect(monitor.network.onRequest.value?.url).toBe('/latest');
+
+  monitor.destroy();
+});
+
 test('NetworkCollector restores fetch when stopped', () => {
   const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
 
