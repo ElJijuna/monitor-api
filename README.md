@@ -88,6 +88,7 @@ apps.
 - `monitor.stop()` and `monitor.destroy()` restore patched browser APIs.
 - Multiple monitor instances share network and React global hooks; the last active instance restores them.
 - Histories are bounded by `maxHistory`.
+- Custom event payloads are copied before retention and bounded by depth and UTF-8 byte size.
 - Production reporting starts only after `monitor.start()` and only when `fetch`
   is available.
 
@@ -324,6 +325,12 @@ monitor.events.snapshot.subscribe((snap) => {
 monitor.events.clearLog()
 ```
 
+Event data is retained as a serializable copy. Malformed, circular, or oversized
+data is recorded as `null`, while malformed events without a non-empty, bounded
+string `label` are ignored. The defaults allow 256 characters per label, up to
+5 nested object/array levels, and 16 KiB per payload; all limits can be
+overridden in the collector config.
+
 ---
 
 ### WebVitalsCollector
@@ -528,7 +535,11 @@ createMonitor({
       maxFiberVisits: 10_000,      // default 10,000
       includeZeroDuration: false,  // default false
     },
-    events: false,                  // disabled
+    events: {
+      maxLabelLength: 256,          // default 256 characters
+      maxDataDepth: 5,             // default 5 nested object/array levels
+      maxDataBytes: 16 * 1024,     // default 16 KiB of UTF-8 JSON
+    },
     webVitals: { reportAllChanges: true },
   },
 

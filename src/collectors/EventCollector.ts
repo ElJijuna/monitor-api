@@ -8,18 +8,100 @@ import type {
 } from '../core/types';
 
 const CUSTOM_EVENT_NAME = 'app:monitor:event';
+const DEFAULT_MAX_LABEL_LENGTH = 256;
+const DEFAULT_MAX_DATA_DEPTH = 5;
+const DEFAULT_MAX_DATA_BYTES = 16 * 1024;
 
 let _idCounter = 0;
 const uid = () => `evt-${Date.now()}-${++_idCounter}`;
+
+function cloneEventData(
+  data: Record<string, unknown> | null,
+  maxDepth: number,
+  maxBytes: number,
+): Record<string, unknown> | null {
+  if (data === null) {
+    return null;
+  }
+
+  try {
+    const serialized = JSON.stringify(data);
+
+    if (serialized === undefined || getUtf8ByteLength(serialized) > maxBytes) {
+      return null;
+    }
+
+    const clone: unknown = JSON.parse(serialized);
+
+    return clone !== null &&
+      typeof clone === 'object' &&
+      !Array.isArray(clone) &&
+      isWithinDataDepth(clone, maxDepth)
+      ? (clone as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isWithinDataDepth(root: object, maxDepth: number): boolean {
+  const stack: Array<{ depth: number; value: object }> = [{ depth: 1, value: root }];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+
+    if (!current) {
+      continue;
+    }
+
+    if (current.depth > maxDepth) {
+      return false;
+    }
+
+    for (const value of Object.values(current.value)) {
+      if (value !== null && typeof value === 'object') {
+        stack.push({ depth: current.depth + 1, value });
+      }
+    }
+  }
+
+  return true;
+}
+
+function getUtf8ByteLength(value: string): number {
+  let bytes = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.codePointAt(index) ?? 0;
+
+    if (codePoint > 0xffff) {
+      index += 1;
+    }
+
+    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+  }
+
+  return bytes;
+}
+
+function normalizeLimit(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
 
 export class EventCollector implements IEventCollector {
   readonly snapshot: SSignal<EventSnapshot>;
   readonly onEvent: SSignal<MonitorEvent | null>;
 
   #entries: SSignal<MonitorEvent[]>;
+  #maxLabelLength: number;
+  #maxDataDepth: number;
+  #maxDataBytes: number;
   #listener: ((e: Event) => void) | null = null;
 
   constructor(private readonly config: EventCollectorConfig) {
+    this.#maxLabelLength = normalizeLimit(config.maxLabelLength, DEFAULT_MAX_LABEL_LENGTH);
+    this.#maxDataDepth = normalizeLimit(config.maxDataDepth, DEFAULT_MAX_DATA_DEPTH);
+    this.#maxDataBytes = normalizeLimit(config.maxDataBytes, DEFAULT_MAX_DATA_BYTES);
     this.#entries = new SSignal<MonitorEvent[]>([]);
     this.onEvent = new SSignal<MonitorEvent | null>(null);
 
@@ -65,20 +147,35 @@ export class EventCollector implements IEventCollector {
   }
 
   #handleEvent(e: CustomEvent): void {
-    const { label, data } = e.detail as { label?: string; data?: Record<string, unknown> };
+    try {
+      if (typeof e.detail !== 'object' || e.detail === null) {
+        return;
+      }
 
-    if (typeof label !== 'string') {
-      return;
+      const { label, data } = e.detail as { label?: unknown; data?: unknown };
+
+      if (typeof label !== 'string') {
+        return;
+      }
+
+      this.#record(
+        label,
+        data && typeof data === 'object' ? (data as Record<string, unknown>) : null,
+      );
+    } catch {
+      // Custom event input must never escape into the host application.
     }
-
-    this.#record(label, data ?? null);
   }
 
   #record(label: string, data: Record<string, unknown> | null): void {
+    if (label.length === 0 || label.length > this.#maxLabelLength) {
+      return;
+    }
+
     const event: MonitorEvent = {
       id: uid(),
       label,
-      data,
+      data: cloneEventData(data, this.#maxDataDepth, this.#maxDataBytes),
       timestamp: Date.now(),
     };
 
@@ -89,11 +186,13 @@ export class EventCollector implements IEventCollector {
   }
 
   #computeByLabel(entries: MonitorEvent[]): Record<string, number> {
-    return entries.reduce<Record<string, number>>((byLabel, event) => {
-      byLabel[event.label] = (byLabel[event.label] ?? 0) + 1;
+    const byLabel = new Map<string, number>();
 
-      return byLabel;
-    }, {});
+    for (const event of entries) {
+      byLabel.set(event.label, (byLabel.get(event.label) ?? 0) + 1);
+    }
+
+    return Object.fromEntries(byLabel);
   }
 }
 

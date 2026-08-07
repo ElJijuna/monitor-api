@@ -99,6 +99,36 @@ test('React byComponent is derived from retained history', () => {
   monitor.destroy();
 });
 
+test('ReactCollector aggregates component names that match inherited object keys', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  const components = {
+    constructor() {},
+    toString() {},
+    ['__proto__']() {},
+  };
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commit(components.constructor, 1);
+    commit(components.toString, 2);
+    commit(components.__proto__, 3);
+
+    const byComponent = monitor.react.snapshot.value.byComponent;
+
+    expect(Object.keys(byComponent)).toEqual(['constructor', 'toString', '__proto__']);
+    expect(byComponent.constructor).toMatchObject({ renders: 1, totalDuration: 1 });
+    expect(byComponent.toString).toMatchObject({ renders: 1, totalDuration: 2 });
+    expect(byComponent.__proto__).toMatchObject({ renders: 1, totalDuration: 3 });
+  } finally {
+    monitor.destroy();
+  }
+});
+
 test('ReactCollector handles deeply nested fiber trees without overflowing the stack', () => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,

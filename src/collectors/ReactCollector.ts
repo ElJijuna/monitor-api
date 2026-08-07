@@ -302,36 +302,36 @@ export class ReactCollector implements IReactCollector {
   }
 
   #computeByComponent(entries: RenderEntry[]): Record<string, ComponentStats> {
-    const byComponent: Record<string, ComponentStats> = {};
+    const byComponent = new Map<string, ComponentStats>();
 
     for (const entry of entries) {
       if (entry.type === 'unmount') {
         continue;
       }
 
-      const existing = byComponent[entry.component];
+      const existing = byComponent.get(entry.component);
 
       if (existing) {
         const renders = existing.renders + 1;
         const totalDuration = existing.totalDuration + entry.duration;
 
-        byComponent[entry.component] = {
+        byComponent.set(entry.component, {
           renders,
           totalDuration,
           avgDuration: Math.round((totalDuration / renders) * 10) / 10,
           lastRender: entry.timestamp,
-        };
+        });
       } else {
-        byComponent[entry.component] = {
+        byComponent.set(entry.component, {
           renders: 1,
           totalDuration: entry.duration,
           avgDuration: entry.duration,
           lastRender: entry.timestamp,
-        };
+        });
       }
     }
 
-    return byComponent;
+    return Object.fromEntries(byComponent);
   }
 
   #walkFiber(fiber: Fiber | null, entries: RenderEntry[], now: number, commitId: number): boolean {

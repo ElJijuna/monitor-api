@@ -24,6 +24,12 @@ export interface EventSnapshot {
 export interface EventCollectorConfig {
   /** Maximum number of custom events to retain. */
   maxHistory: number;
+  /** Maximum event label length. Empty or longer labels are ignored. Defaults to 256. */
+  maxLabelLength?: number;
+  /** Maximum nested object/array levels retained in event data. Defaults to 5. */
+  maxDataDepth?: number;
+  /** Maximum UTF-8 bytes retained per event payload. Defaults to 16 KiB. */
+  maxDataBytes?: number;
 }
 
 /** Public API exposed by the event collector. */
