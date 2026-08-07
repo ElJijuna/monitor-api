@@ -32,6 +32,7 @@ export class PerformanceCollector implements IPerformanceCollector {
   #longTaskObserver: PerformanceObserver | null = null;
   #clsObserver: PerformanceObserver | null = null;
   #memoryInterval: ReturnType<typeof setInterval> | null = null;
+  #started = false;
 
   constructor(private readonly config: PerformanceCollectorConfig) {
     this.fps = new SSignal(0);
@@ -55,10 +56,11 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   start(): void {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || this.#started) {
       return;
     }
 
+    this.#started = true;
     this.#startFps();
     this.#startMemory();
     this.#startLongTasks();
@@ -66,6 +68,10 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   stop(): void {
+    this.#started = false;
+    this.#frameCount = 0;
+    this.#lastFpsTime = 0;
+
     if (this.#rafId !== null) {
       cancelAnimationFrame(this.#rafId);
       this.#rafId = null;
