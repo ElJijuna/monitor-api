@@ -1,3 +1,21 @@
+# [1.2.0](https://github.com/ElJijuna/monitor-api/compare/v1.1.1...v1.2.0) (2026-08-07)
+
+
+### Bug Fixes
+
+* enhance PerformanceCollector to prevent multiple starts and reset state on stop ([8106cf9](https://github.com/ElJijuna/monitor-api/commit/8106cf9b9c86080b424f9cb56239d7b7bf429dfa))
+
+
+### Features
+
+* enhance NetworkCollector to accurately measure response payload sizes without cloning responses ([5e63d5d](https://github.com/ElJijuna/monitor-api/commit/5e63d5d4b9c91644d6996d84d93ae0743a4dfa4d))
+* enhance production reporting to exclude sensitive data by default and implement custom payload transformation ([88983fa](https://github.com/ElJijuna/monitor-api/commit/88983faaa953bffb2cc7de8c315b9f26725342ae))
+* enhance ReactCollector to track truncated commits and improve unmount handling ([0c1ba21](https://github.com/ElJijuna/monitor-api/commit/0c1ba218dfcf36603c29429eda8f0723266b7c89))
+* implement maxHistory functionality across collectors and add tests for zero history retention ([beccca5](https://github.com/ElJijuna/monitor-api/commit/beccca58cf16cfe655cda4e593f54a21bd35eaff))
+* implement shared global hooks for NetworkCollector and ReactCollector, allowing independent operation and preserving third-party patches ([bf13c43](https://github.com/ElJijuna/monitor-api/commit/bf13c438f2b4e97c8c89f807521ea30199d57be2))
+* implement window5s expiration logic in NetworkCollector and add related tests ([6f78122](https://github.com/ElJijuna/monitor-api/commit/6f78122cd792480947ed91b48e333e534cb9aba0))
+* improve production reporting to handle transform and serialization errors, ensuring continuous operation without overlapping requests ([a68a3d5](https://github.com/ElJijuna/monitor-api/commit/a68a3d52f9b05bc20abb92506d284085bf6ac22e))
+
 ## [1.1.1](https://github.com/ElJijuna/monitor-api/compare/v1.1.0...v1.1.1) (2026-06-06)
 
 
