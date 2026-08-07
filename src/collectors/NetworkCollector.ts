@@ -16,15 +16,239 @@ interface XHRWithMonitor extends XMLHttpRequest {
   __mon_url?: string;
 }
 
+type NetworkListener = (entry: NetworkEntry) => void;
+
+const networkListeners = new Set<NetworkListener>();
+
+let originalFetch: typeof fetch | null = null;
+let patchedFetch: typeof fetch | null = null;
+let originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
+let patchedXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
+let originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
+let patchedXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
+
+function emitNetworkEntry(entry: NetworkEntry): void {
+  for (const listener of networkListeners) {
+    listener(entry);
+  }
+}
+
+function estimateBodySize(body: BodyInit | null | undefined): number {
+  if (!body) {
+    return 0;
+  }
+
+  if (typeof body === 'string') {
+    return new Blob([body]).size;
+  }
+
+  if (body instanceof Blob) {
+    return body.size;
+  }
+
+  if (body instanceof ArrayBuffer) {
+    return body.byteLength;
+  }
+
+  if (ArrayBuffer.isView(body)) {
+    return body.byteLength;
+  }
+
+  return 0;
+}
+
+function patchFetch(): void {
+  originalFetch = window.fetch;
+  const callOriginal = originalFetch.bind(window);
+
+  patchedFetch = async (input, init) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : (input as Request).url;
+
+    const method = (
+      init?.method ??
+      (input instanceof Request ? input.method : undefined) ??
+      'GET'
+    ).toUpperCase();
+
+    const requestSize = estimateBodySize(init?.body);
+    const start = performance.now();
+
+    try {
+      const response = await callOriginal(input, init);
+      const latency = performance.now() - start;
+
+      response
+        .clone()
+        .arrayBuffer()
+        .then((buf) => {
+          emitNetworkEntry({
+            id: uid(),
+            url,
+            method,
+            status: response.status,
+            latency: Math.round(latency),
+            payloadSize: buf.byteLength,
+            requestSize,
+            initiator: 'fetch',
+            timestamp: Date.now(),
+            error: null,
+          });
+        })
+        .catch(() => {
+          emitNetworkEntry({
+            id: uid(),
+            url,
+            method,
+            status: response.status,
+            latency: Math.round(latency),
+            payloadSize: 0,
+            requestSize,
+            initiator: 'fetch',
+            timestamp: Date.now(),
+            error: null,
+          });
+        });
+
+      return response;
+    } catch (err) {
+      emitNetworkEntry({
+        id: uid(),
+        url,
+        method,
+        status: 0,
+        latency: Math.round(performance.now() - start),
+        payloadSize: 0,
+        requestSize,
+        initiator: 'fetch',
+        timestamp: Date.now(),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  };
+
+  window.fetch = patchedFetch;
+}
+
+function patchXhr(): void {
+  const proto = XMLHttpRequest.prototype as XHRWithMonitor;
+  const callOriginalOpen = proto.open;
+  const callOriginalSend = proto.send;
+
+  originalXhrOpen = callOriginalOpen;
+  originalXhrSend = callOriginalSend;
+
+  proto.open = function (
+    this: XHRWithMonitor,
+    method: string,
+    url: string | URL,
+    ...rest: unknown[]
+  ) {
+    this.__mon_method = method.toUpperCase();
+    this.__mon_url = typeof url === 'string' ? url : url.toString();
+
+    return callOriginalOpen.apply(this, [method, url as string, ...rest] as Parameters<
+      typeof callOriginalOpen
+    >);
+  } as typeof XMLHttpRequest.prototype.open;
+  patchedXhrOpen = proto.open;
+
+  proto.send = function (this: XHRWithMonitor, body?: Document | XMLHttpRequestBodyInit | null) {
+    const start = performance.now();
+    const requestSize = estimateBodySize(body as BodyInit | null | undefined);
+    const url = this.__mon_url ?? '';
+    const method = this.__mon_method ?? 'GET';
+
+    this.addEventListener('loadend', () => {
+      const payloadSize =
+        typeof this.response === 'string'
+          ? new Blob([this.response]).size
+          : this.response instanceof ArrayBuffer
+            ? this.response.byteLength
+            : 0;
+
+      emitNetworkEntry({
+        id: uid(),
+        url,
+        method,
+        status: this.status,
+        latency: Math.round(performance.now() - start),
+        payloadSize,
+        requestSize,
+        initiator: 'xhr',
+        timestamp: Date.now(),
+        error: this.status === 0 ? 'Network error' : null,
+      });
+    });
+
+    return callOriginalSend.call(this, body);
+  } as typeof XMLHttpRequest.prototype.send;
+  patchedXhrSend = proto.send;
+}
+
+function installNetworkPatches(): void {
+  patchFetch();
+  patchXhr();
+}
+
+function restoreNetworkPatches(): void {
+  if (patchedFetch && originalFetch && window.fetch === patchedFetch) {
+    window.fetch = originalFetch;
+  }
+
+  const proto = XMLHttpRequest.prototype as XHRWithMonitor;
+
+  if (patchedXhrOpen && originalXhrOpen && proto.open === patchedXhrOpen) {
+    proto.open = originalXhrOpen;
+  }
+
+  if (patchedXhrSend && originalXhrSend && proto.send === patchedXhrSend) {
+    proto.send = originalXhrSend;
+  }
+
+  originalFetch = null;
+  patchedFetch = null;
+  originalXhrOpen = null;
+  patchedXhrOpen = null;
+  originalXhrSend = null;
+  patchedXhrSend = null;
+}
+
+function subscribeToNetwork(listener: NetworkListener): () => void {
+  networkListeners.add(listener);
+
+  if (networkListeners.size === 1) {
+    installNetworkPatches();
+  }
+
+  let subscribed = true;
+
+  return () => {
+    if (!subscribed) {
+      return;
+    }
+
+    subscribed = false;
+    networkListeners.delete(listener);
+
+    if (networkListeners.size === 0) {
+      restoreNetworkPatches();
+    }
+  };
+}
+
 export class NetworkCollector implements INetworkCollector {
   readonly snapshot: SSignal<NetworkSnapshot>;
   readonly onRequest: SSignal<NetworkEntry | null>;
 
   #entries: SSignal<NetworkEntry[]>;
   #filter: (url: string) => boolean;
-  #originalFetch: typeof fetch | null = null;
-  #originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
-  #originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
+  #teardown: (() => void) | null = null;
 
   constructor(private readonly config: NetworkCollectorConfig) {
     this.#filter = config.filter ?? (() => true);
@@ -45,29 +269,16 @@ export class NetworkCollector implements INetworkCollector {
       return;
     }
 
-    if (this.#originalFetch || this.#originalXhrOpen || this.#originalXhrSend) {
+    if (this.#teardown) {
       return;
     }
 
-    this.#patchFetch();
-    this.#patchXhr();
+    this.#teardown = subscribeToNetwork((entry) => this.#record(entry));
   }
 
   stop(): void {
-    if (this.#originalFetch) {
-      window.fetch = this.#originalFetch;
-      this.#originalFetch = null;
-    }
-
-    if (this.#originalXhrOpen) {
-      XMLHttpRequest.prototype.open = this.#originalXhrOpen;
-      this.#originalXhrOpen = null;
-    }
-
-    if (this.#originalXhrSend) {
-      XMLHttpRequest.prototype.send = this.#originalXhrSend;
-      this.#originalXhrSend = null;
-    }
+    this.#teardown?.();
+    this.#teardown = null;
   }
 
   destroy(): void {
@@ -90,163 +301,6 @@ export class NetworkCollector implements INetworkCollector {
     this.#entries.value = (prev: NetworkEntry[]) =>
       appendHistory(prev, [entry], this.config.maxHistory);
     this.onRequest.value = entry;
-  }
-
-  #patchFetch(): void {
-    const original = window.fetch.bind(window);
-
-    this.#originalFetch = window.fetch;
-
-    window.fetch = async (input, init) => {
-      const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.href
-            : (input as Request).url;
-
-      const method = (
-        init?.method ??
-        (input instanceof Request ? input.method : undefined) ??
-        'GET'
-      ).toUpperCase();
-
-      const requestSize = this.#estimateBodySize(init?.body);
-      const start = performance.now();
-
-      try {
-        const response = await original(input, init);
-        const latency = performance.now() - start;
-
-        response
-          .clone()
-          .arrayBuffer()
-          .then((buf) => {
-            this.#record({
-              id: uid(),
-              url,
-              method,
-              status: response.status,
-              latency: Math.round(latency),
-              payloadSize: buf.byteLength,
-              requestSize,
-              initiator: 'fetch',
-              timestamp: Date.now(),
-              error: null,
-            });
-          })
-          .catch(() => {
-            this.#record({
-              id: uid(),
-              url,
-              method,
-              status: response.status,
-              latency: Math.round(latency),
-              payloadSize: 0,
-              requestSize,
-              initiator: 'fetch',
-              timestamp: Date.now(),
-              error: null,
-            });
-          });
-
-        return response;
-      } catch (err) {
-        this.#record({
-          id: uid(),
-          url,
-          method,
-          status: 0,
-          latency: Math.round(performance.now() - start),
-          payloadSize: 0,
-          requestSize,
-          initiator: 'fetch',
-          timestamp: Date.now(),
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
-      }
-    };
-  }
-
-  #patchXhr(): void {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const collector = this;
-    const proto = XMLHttpRequest.prototype as XHRWithMonitor;
-    const originalOpen: typeof XMLHttpRequest.prototype.open = proto.open;
-    const originalSend: typeof XMLHttpRequest.prototype.send = proto.send;
-
-    this.#originalXhrOpen = originalOpen;
-    this.#originalXhrSend = originalSend;
-
-    proto.open = function (
-      this: XHRWithMonitor,
-      method: string,
-      url: string | URL,
-      ...rest: unknown[]
-    ) {
-      this.__mon_method = method.toUpperCase();
-      this.__mon_url = typeof url === 'string' ? url : url.toString();
-
-      return originalOpen.apply(this, [method, url as string, ...rest] as Parameters<
-        typeof originalOpen
-      >);
-    };
-
-    proto.send = function (this: XHRWithMonitor, body?: Document | XMLHttpRequestBodyInit | null) {
-      const start = performance.now();
-      const requestSize = collector.#estimateBodySize(body as BodyInit | null | undefined);
-      const url = this.__mon_url ?? '';
-      const method = this.__mon_method ?? 'GET';
-
-      this.addEventListener('loadend', () => {
-        const payloadSize =
-          typeof this.response === 'string'
-            ? new Blob([this.response]).size
-            : this.response instanceof ArrayBuffer
-              ? this.response.byteLength
-              : 0;
-
-        collector.#record({
-          id: uid(),
-          url,
-          method,
-          status: this.status,
-          latency: Math.round(performance.now() - start),
-          payloadSize,
-          requestSize,
-          initiator: 'xhr',
-          timestamp: Date.now(),
-          error: this.status === 0 ? 'Network error' : null,
-        });
-      });
-
-      return originalSend.call(this, body);
-    };
-  }
-
-  #estimateBodySize(body: BodyInit | null | undefined): number {
-    if (!body) {
-      return 0;
-    }
-
-    if (typeof body === 'string') {
-      return new Blob([body]).size;
-    }
-
-    if (body instanceof Blob) {
-      return body.size;
-    }
-
-    if (body instanceof ArrayBuffer) {
-      return body.byteLength;
-    }
-
-    if (ArrayBuffer.isView(body)) {
-      return body.byteLength;
-    }
-
-    return 0;
   }
 
   #computeWindow5s(entries: NetworkEntry[]): NetworkWindow5s {

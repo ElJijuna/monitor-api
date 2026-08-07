@@ -35,6 +35,87 @@ interface DevToolsHook {
   [key: string]: unknown;
 }
 
+type ReactWindow = Window & { __REACT_DEVTOOLS_GLOBAL_HOOK__?: DevToolsHook };
+type ReactCommitListener = (root: FiberRoot) => void;
+
+const reactCommitListeners = new Set<ReactCommitListener>();
+
+let installedWindow: ReactWindow | null = null;
+let installedHook: DevToolsHook | null = null;
+let originalCommitHandler: DevToolsHook['onCommitFiberRoot'] | null = null;
+let patchedCommitHandler: DevToolsHook['onCommitFiberRoot'] | null = null;
+
+function installReactHook(): void {
+  const win = window as ReactWindow;
+
+  if (!win.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+    win.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+      checkDCE: () => {},
+      isDisabled: false,
+      supportsFiber: true,
+      inject: () => {},
+      onCommitFiberRoot: () => {},
+      onCommitFiberUnmount: () => {},
+      onPostCommitFiberRoot: () => {},
+    };
+  }
+
+  const hook = win.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  const original = hook.onCommitFiberRoot;
+
+  const patched: DevToolsHook['onCommitFiberRoot'] = (rendererID, root, priorityLevel) => {
+    original.call(hook, rendererID, root, priorityLevel);
+
+    for (const listener of reactCommitListeners) {
+      listener(root);
+    }
+  };
+
+  installedWindow = win;
+  installedHook = hook;
+  originalCommitHandler = original;
+  patchedCommitHandler = patched;
+  hook.onCommitFiberRoot = patched;
+}
+
+function restoreReactHook(): void {
+  if (
+    installedWindow?.__REACT_DEVTOOLS_GLOBAL_HOOK__ === installedHook &&
+    installedHook?.onCommitFiberRoot === patchedCommitHandler &&
+    originalCommitHandler
+  ) {
+    installedHook.onCommitFiberRoot = originalCommitHandler;
+  }
+
+  installedWindow = null;
+  installedHook = null;
+  originalCommitHandler = null;
+  patchedCommitHandler = null;
+}
+
+function subscribeToReactCommits(listener: ReactCommitListener): () => void {
+  reactCommitListeners.add(listener);
+
+  if (reactCommitListeners.size === 1) {
+    installReactHook();
+  }
+
+  let subscribed = true;
+
+  return () => {
+    if (!subscribed) {
+      return;
+    }
+
+    subscribed = false;
+    reactCommitListeners.delete(listener);
+
+    if (reactCommitListeners.size === 0) {
+      restoreReactHook();
+    }
+  };
+}
+
 const FunctionComponent = 0;
 const ClassComponent = 1;
 
@@ -81,7 +162,7 @@ export class ReactCollector implements IReactCollector {
       return;
     }
 
-    this.#teardown = this.#installHook();
+    this.#teardown = subscribeToReactCommits((root) => this.#handleCommit(root));
   }
 
   stop(): void {
@@ -102,36 +183,6 @@ export class ReactCollector implements IReactCollector {
   clearLog(): void {
     this.#entries.value = [];
     this.#totalCommits.value = 0;
-  }
-
-  #installHook(): () => void {
-    const win = window as Window & { __REACT_DEVTOOLS_GLOBAL_HOOK__?: DevToolsHook };
-
-    if (!win.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
-      win.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-        checkDCE: () => {},
-        isDisabled: false,
-        supportsFiber: true,
-        inject: () => {},
-        onCommitFiberRoot: () => {},
-        onCommitFiberUnmount: () => {},
-        onPostCommitFiberRoot: () => {},
-      };
-    }
-
-    const hook = win.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    const original = hook.onCommitFiberRoot;
-
-    hook.onCommitFiberRoot = (rendererID, root, priorityLevel) => {
-      original.call(hook, rendererID, root, priorityLevel);
-      this.#handleCommit(root);
-    };
-
-    return () => {
-      if (win.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
-        win.__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot = original;
-      }
-    };
   }
 
   #handleCommit(root: FiberRoot): void {

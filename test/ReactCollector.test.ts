@@ -159,3 +159,102 @@ test('ReactCollector start is idempotent', () => {
 
   monitor.destroy();
 });
+
+test('ReactCollectors share the global hook and stop independently', () => {
+  const original = jest.fn();
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: {
+        onCommitFiberRoot: original,
+      },
+    },
+  });
+
+  function Component() {}
+
+  const first = createMonitor({ collectors: { react: true } });
+  const second = createMonitor({ collectors: { react: true } });
+
+  first.start();
+  const sharedHook = (
+    globalThis.window as unknown as {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+    }
+  ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot;
+
+  second.start();
+
+  expect(
+    (
+      globalThis.window as unknown as {
+        __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+      }
+    ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot,
+  ).toBe(sharedHook);
+
+  commit(Component);
+
+  expect(first.react.snapshot.value.totalCommits).toBe(1);
+  expect(second.react.snapshot.value.totalCommits).toBe(1);
+
+  first.stop();
+
+  expect(
+    (
+      globalThis.window as unknown as {
+        __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+      }
+    ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot,
+  ).toBe(sharedHook);
+
+  commit(Component);
+
+  expect(first.react.snapshot.value.totalCommits).toBe(1);
+  expect(second.react.snapshot.value.totalCommits).toBe(2);
+
+  second.stop();
+
+  expect(
+    (
+      globalThis.window as unknown as {
+        __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+      }
+    ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot,
+  ).toBe(original);
+
+  first.destroy();
+  second.destroy();
+});
+
+test('ReactCollector does not overwrite a newer hook handler when stopped', () => {
+  const original = jest.fn();
+  const thirdPartyHandler = jest.fn();
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: {
+        onCommitFiberRoot: original,
+      },
+    },
+  });
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  monitor.start();
+
+  const hook = (
+    globalThis.window as unknown as {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+    }
+  ).__REACT_DEVTOOLS_GLOBAL_HOOK__;
+
+  hook.onCommitFiberRoot = thirdPartyHandler;
+  monitor.stop();
+
+  expect(hook.onCommitFiberRoot).toBe(thirdPartyHandler);
+
+  monitor.destroy();
+});

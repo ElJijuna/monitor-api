@@ -199,3 +199,152 @@ test('NetworkCollector start is idempotent', () => {
 
   monitor.destroy();
 });
+
+test('NetworkCollectors share global patches and stop independently', async () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+  const originalOpen = FakeXMLHttpRequest.prototype.open;
+  const originalSend = FakeXMLHttpRequest.prototype.send;
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const first = createMonitor({ collectors: { network: true } });
+  const second = createMonitor({ collectors: { network: true } });
+
+  first.start();
+  const sharedFetch = (globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch;
+
+  second.start();
+
+  expect((globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch).toBe(
+    sharedFetch,
+  );
+
+  await sharedFetch('/both');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(first.network.snapshot.value.entries.map((entry) => entry.url)).toEqual(['/both']);
+  expect(second.network.snapshot.value.entries.map((entry) => entry.url)).toEqual(['/both']);
+
+  first.stop();
+
+  expect((globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch).toBe(
+    sharedFetch,
+  );
+
+  await sharedFetch('/second-only');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(first.network.snapshot.value.entries.map((entry) => entry.url)).toEqual(['/both']);
+  expect(second.network.snapshot.value.entries.map((entry) => entry.url)).toEqual([
+    '/both',
+    '/second-only',
+  ]);
+
+  second.stop();
+
+  expect((globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch).toBe(fetch);
+  expect(FakeXMLHttpRequest.prototype.open).toBe(originalOpen);
+  expect(FakeXMLHttpRequest.prototype.send).toBe(originalSend);
+
+  first.destroy();
+  second.destroy();
+});
+
+test('NetworkCollector does not overwrite newer third-party patches when stopped', () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+  const originalOpen = FakeXMLHttpRequest.prototype.open;
+  const originalSend = FakeXMLHttpRequest.prototype.send;
+  const thirdPartyFetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+  const thirdPartyOpen = jest.fn();
+  const thirdPartySend = jest.fn();
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    (globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch = thirdPartyFetch;
+    FakeXMLHttpRequest.prototype.open = thirdPartyOpen;
+    FakeXMLHttpRequest.prototype.send = thirdPartySend;
+
+    monitor.stop();
+
+    expect((globalThis.window as unknown as { fetch: typeof globalThis.fetch }).fetch).toBe(
+      thirdPartyFetch,
+    );
+    expect(FakeXMLHttpRequest.prototype.open).toBe(thirdPartyOpen);
+    expect(FakeXMLHttpRequest.prototype.send).toBe(thirdPartySend);
+  } finally {
+    monitor.destroy();
+    FakeXMLHttpRequest.prototype.open = originalOpen;
+    FakeXMLHttpRequest.prototype.send = originalSend;
+  }
+});
+
+test('a newer chained XHR patch keeps delegating after NetworkCollector stops', () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+  const originalOpen = FakeXMLHttpRequest.prototype.open;
+  const originalSend = FakeXMLHttpRequest.prototype.send;
+  const baseOpen = jest.fn(originalOpen);
+  const baseSend = jest.fn(originalSend);
+
+  FakeXMLHttpRequest.prototype.open = baseOpen;
+  FakeXMLHttpRequest.prototype.send = baseSend;
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const monitoredOpen = FakeXMLHttpRequest.prototype.open;
+    const monitoredSend = FakeXMLHttpRequest.prototype.send;
+    const thirdPartyOpen = function (this: XMLHttpRequest, ...args: unknown[]) {
+      return (monitoredOpen as (...params: unknown[]) => unknown).apply(this, args);
+    } as unknown as typeof FakeXMLHttpRequest.prototype.open;
+    const thirdPartySend = function (this: XMLHttpRequest, ...args: unknown[]) {
+      return (monitoredSend as (...params: unknown[]) => unknown).apply(this, args);
+    } as unknown as typeof FakeXMLHttpRequest.prototype.send;
+
+    FakeXMLHttpRequest.prototype.open = thirdPartyOpen;
+    FakeXMLHttpRequest.prototype.send = thirdPartySend;
+
+    monitor.stop();
+
+    const xhr = new FakeXMLHttpRequest() as unknown as XMLHttpRequest;
+
+    xhr.open('GET', '/chained');
+    xhr.send();
+
+    expect(baseOpen).toHaveBeenCalledTimes(1);
+    expect(baseSend).toHaveBeenCalledTimes(1);
+  } finally {
+    monitor.destroy();
+    FakeXMLHttpRequest.prototype.open = originalOpen;
+    FakeXMLHttpRequest.prototype.send = originalSend;
+  }
+});

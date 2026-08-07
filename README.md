@@ -86,6 +86,7 @@ apps.
 - Browser collectors no-op when `window` is unavailable.
 - Collection starts only after `monitor.start()`.
 - `monitor.stop()` and `monitor.destroy()` restore patched browser APIs.
+- Multiple monitor instances share network and React global hooks; the last active instance restores them.
 - Histories are bounded by `maxHistory`.
 - Production reporting starts only after `monitor.start()` and only when `fetch`
   is available.
