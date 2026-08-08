@@ -44,6 +44,21 @@ test('EventCollector keeps entries and label counts inside retained history', ()
   monitor.destroy();
 });
 
+test('EventCollector exposes direct emit through the monitor facade', () => {
+  const monitor = createMonitor({ collectors: { events: true } });
+
+  try {
+    monitor.events.emit('direct', { source: 'facade' });
+
+    expect(monitor.events.snapshot.value.entries[0]).toMatchObject({
+      label: 'direct',
+      data: { source: 'facade' },
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
 test('EventCollector retains no history when maxHistory is zero', () => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,

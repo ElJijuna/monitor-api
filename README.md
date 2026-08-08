@@ -62,6 +62,7 @@ import { createMonitor } from 'monitor-api'
 
 const monitor = createMonitor({
   collectors: ['performance', 'network', 'react', 'events', 'webVitals'], // default: all
+  sampleRate: 1,          // per-monitor sampling probability from 0 to 1 (default: 1)
   maxHistory: 120,       // data points kept per metric; 0 disables history (default: 120)
   networkFilter: (url) => !url.includes('analytics'),        // optional
   env: 'development',    // 'development' | 'production' (default: 'development')
@@ -89,8 +90,8 @@ apps.
 - Multiple monitor instances share network and React global hooks; the last active instance restores them.
 - Histories are bounded by `maxHistory`.
 - Custom event payloads are copied before retention and bounded by depth and UTF-8 byte size.
-- Production reporting starts only after `monitor.start()` and only when `fetch`
-  is available.
+- Production reporting starts only after `monitor.start()` and requires either
+  `fetch` or a custom transport.
 
 For production apps, prefer a conservative `maxHistory`, select only the
 collectors you need, and use `report.transform` to send a compact payload.
@@ -298,6 +299,9 @@ emitMonitorEvent('user:login', { userId: 42 })
 emitMonitorEvent('route:change', { from: '/home', to: '/settings' })
 emitMonitorEvent('error:caught', { message: 'Network timeout' })
 
+// Or record directly through the typed monitor facade
+monitor.events.emit('checkout:complete', { total: 49.99 })
+
 // Option B — native CustomEvent (no import needed)
 window.dispatchEvent(new CustomEvent('app:monitor:event', {
   detail: { label: 'cache:miss', data: { key: 'user_profile' } }
@@ -483,6 +487,12 @@ const monitor = createMonitor({
   report: {
     endpoint: 'https://my-api.com/metrics',
     interval: 30_000,  // send every 30s
+    headers: { Authorization: `Bearer ${token}` },
+    timeout: 5_000,
+    retry: {
+      maxAttempts: 3,
+      delay: (failedAttempt) => failedAttempt * 1_000,
+    },
     transform: (snap) => ({
       fps: snap.performance.fps,
       memory: snap.performance.memory?.percent ?? null,
@@ -500,10 +510,13 @@ monitor.start()
 ```
 
 Production reporting is intentionally best-effort: failed report requests are
-ignored so monitoring never breaks the application. Errors from `transform`,
-serialization, and synchronous transport setup are contained as well. The
-reporter keeps at most one request in flight and skips interval ticks while that
-request is pending. If `fetch` is unavailable, the reporter does not start.
+ignored after the optional retry policy is exhausted, so monitoring never breaks
+the application. Errors from `transform`, serialization, timeout, and transport
+setup are contained as well. The reporter keeps at most one delivery in flight
+and skips interval ticks while it is pending. Authentication can be supplied
+through `headers`. A custom `transport({ endpoint, payload, body, headers,
+signal })` can replace `fetch`; without either transport, the reporter does not
+start.
 
 Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
 snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;
@@ -544,8 +557,13 @@ createMonitor({
   },
 
   maxHistory: 60,   // data points per metric
+  sampleRate: 0.25, // one sampling decision per monitor instance
 })
 ```
+
+Collectors that are disabled—or belong to a sampled-out monitor—use inert
+facades with empty snapshots. Their concrete collectors are not constructed and
+their signals are not dependencies of the combined snapshot.
 
 ---
 

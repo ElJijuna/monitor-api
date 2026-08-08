@@ -38,6 +38,8 @@ export interface IEventCollector {
   snapshot: SSignal<EventSnapshot>;
   /** Signal set to the latest recorded event, or null before any event is recorded. */
   onEvent: SSignal<MonitorEvent | null>;
+  /** Records an application event directly without dispatching a browser `CustomEvent`. */
+  emit(label: string, data?: Record<string, unknown>): void;
   /** Clears retained events and derived label counts. */
   clearLog(): void;
   /** Starts listening for events emitted by `emitMonitorEvent`. */

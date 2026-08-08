@@ -29,6 +29,9 @@ export type {
   // Performance
   PerformanceSnapshot,
   ProductionReportConfig,
+  ProductionReportRequest,
+  ProductionReportRetryPolicy,
+  ProductionReportTransport,
   ReactCollectorConfig,
   // React
   ReactSnapshot,

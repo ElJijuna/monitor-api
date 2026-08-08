@@ -1,10 +1,11 @@
 import { jest } from '@jest/globals';
-import type { MonitorSnapshot } from '../src/core/types';
+import type { MonitorSnapshot, ProductionReportRequest } from '../src/core/types';
 import { createMonitor, emitMonitorEvent } from '../src/index';
 
 afterEach(() => {
   Reflect.deleteProperty(globalThis, 'window');
   jest.useRealTimers();
+  jest.restoreAllMocks();
 });
 
 test('createMonitor exposes a combined snapshot and subscription API', () => {
@@ -34,6 +35,78 @@ test('createMonitor is safe to construct and start without browser globals', () 
   expect(() => monitor.start()).not.toThrow();
   expect(() => monitor.stop()).not.toThrow();
   expect(() => monitor.destroy()).not.toThrow();
+});
+
+test('sampleRate zero samples out the monitor instance', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: new EventTarget(),
+  });
+
+  const monitor = createMonitor({
+    sampleRate: 0,
+    collectors: ['events'],
+  });
+
+  try {
+    monitor.start();
+    emitMonitorEvent('sampled-out');
+
+    expect(monitor.events.snapshot.value.entries).toEqual([]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('createMonitor rejects invalid sample rates', () => {
+  for (const sampleRate of [-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(() => createMonitor({ sampleRate })).toThrow(RangeError);
+  }
+});
+
+test('sampleRate makes one sampling decision per monitor instance', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: new EventTarget(),
+  });
+
+  const random = jest.spyOn(Math, 'random').mockReturnValueOnce(0.25).mockReturnValueOnce(0.75);
+  const sampledIn = createMonitor({ sampleRate: 0.5, collectors: ['events'] });
+  const sampledOut = createMonitor({ sampleRate: 0.5, collectors: ['events'] });
+
+  try {
+    sampledIn.start();
+    sampledOut.start();
+    emitMonitorEvent('sampled');
+
+    expect(sampledIn.events.snapshot.value.entries).toHaveLength(1);
+    expect(sampledOut.events.snapshot.value.entries).toEqual([]);
+    expect(random).toHaveBeenCalledTimes(2);
+  } finally {
+    sampledIn.destroy();
+    sampledOut.destroy();
+  }
+});
+
+test('disabled collectors are not constructed', () => {
+  const memoryDescriptor = Object.getOwnPropertyDescriptor(performance, 'memory');
+
+  Object.defineProperty(performance, 'memory', {
+    configurable: true,
+    get() {
+      throw new Error('PerformanceCollector was constructed');
+    },
+  });
+
+  try {
+    expect(() => createMonitor({ collectors: [] })).not.toThrow();
+  } finally {
+    if (memoryDescriptor) {
+      Object.defineProperty(performance, 'memory', memoryDescriptor);
+    } else {
+      Reflect.deleteProperty(performance, 'memory');
+    }
+  }
 });
 
 test('production reporting does not start during construction', () => {
@@ -182,6 +255,178 @@ test('production reporting uses transform as an explicit opt-in to custom data',
   }
 });
 
+test('production reporting merges custom headers with its JSON content type', async () => {
+  jest.useFakeTimers();
+
+  const originalFetch = globalThis.fetch;
+  const fetchMock = jest.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(),
+  );
+
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: fetchMock,
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+      headers: {
+        Authorization: 'Bearer token',
+        'X-Monitor-Tenant': 'acme',
+      },
+    },
+  });
+
+  try {
+    monitor.start();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer token',
+      'X-Monitor-Tenant': 'acme',
+    });
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
+  }
+});
+
+test('production reporting supports a custom transport without global fetch', async () => {
+  jest.useFakeTimers();
+
+  const originalFetch = globalThis.fetch;
+  const transport = jest.fn(async () => {});
+
+  Reflect.deleteProperty(globalThis, 'fetch');
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: 'custom://monitor',
+      interval: 1000,
+      headers: { Authorization: 'ApiKey secret' },
+      transform: () => ({ status: 'ok' }),
+      transport,
+    },
+  });
+
+  try {
+    monitor.start();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(transport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: 'custom://monitor',
+        payload: { status: 'ok' },
+        body: '{"status":"ok"}',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'ApiKey secret',
+        },
+      }),
+    );
+  } finally {
+    monitor.destroy();
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
+  }
+});
+
+test('production reporting times out a stalled delivery and releases backpressure', async () => {
+  jest.useFakeTimers();
+
+  const transport = jest.fn((_request: ProductionReportRequest) => new Promise<void>(() => {}));
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+      timeout: 100,
+      transport,
+    },
+  });
+
+  try {
+    monitor.start();
+
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(transport).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(100);
+    expect(transport.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+
+    await jest.advanceTimersByTimeAsync(900);
+    expect(transport).toHaveBeenCalledTimes(2);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('production reporting retries failed deliveries according to policy', async () => {
+  jest.useFakeTimers();
+
+  const transport = jest
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error('temporary failure'))
+    .mockResolvedValue(undefined);
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: [],
+    report: {
+      endpoint: '/monitor',
+      interval: 1000,
+      transport,
+      retry: { maxAttempts: 2, delay: 100 },
+    },
+  });
+
+  try {
+    monitor.start();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(transport).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(100);
+    expect(transport).toHaveBeenCalledTimes(2);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('createMonitor rejects invalid production delivery policies', () => {
+  expect(() =>
+    createMonitor({
+      report: { endpoint: '/monitor', interval: 1000, timeout: -1 },
+    }),
+  ).toThrow(RangeError);
+  expect(() =>
+    createMonitor({
+      report: { endpoint: '/monitor', interval: 1000, retry: { maxAttempts: 0 } },
+    }),
+  ).toThrow(RangeError);
+  expect(() =>
+    createMonitor({
+      report: {
+        endpoint: '/monitor',
+        interval: 1000,
+        retry: { maxAttempts: 2, delay: Number.POSITIVE_INFINITY },
+      },
+    }),
+  ).toThrow(RangeError);
+});
+
 test('production reporting contains transform errors and keeps running', () => {
   jest.useFakeTimers();
 
@@ -296,8 +541,7 @@ test('production reporting does not overlap pending requests', async () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     resolveFetch(new Response());
-    await Promise.resolve();
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(0);
 
     jest.advanceTimersByTime(1000);
     expect(fetchMock).toHaveBeenCalledTimes(2);

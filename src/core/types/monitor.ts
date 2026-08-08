@@ -25,12 +25,49 @@ export interface MonitorSnapshot {
   webVitals: WebVitalsSnapshot;
 }
 
+/** Serialized report handed to a custom production transport. */
+export interface ProductionReportRequest {
+  /** Configured destination identifier or URL. */
+  endpoint: string;
+  /** Transformed report value before JSON serialization. */
+  payload: unknown;
+  /** JSON-serialized report body. */
+  body: string;
+  /** Final headers after applying monitor defaults and user overrides. */
+  headers: Readonly<Record<string, string>>;
+  /** Aborted when the configured report timeout elapses. */
+  signal?: AbortSignal;
+}
+
+/** Sends one serialized production report. */
+export type ProductionReportTransport = (
+  request: ProductionReportRequest,
+) => void | PromiseLike<void>;
+
+/** Retry policy for failed or timed-out report deliveries. */
+export interface ProductionReportRetryPolicy {
+  /** Total delivery attempts, including the initial attempt. */
+  maxAttempts: number;
+  /** Delay before each retry, or a function of the failed attempt and error. Defaults to 0. */
+  delay?: number | ((failedAttempt: number, error: unknown) => number);
+  /** Optional predicate that can stop retries early. */
+  shouldRetry?: (error: unknown, failedAttempt: number) => boolean;
+}
+
 /** Configuration for periodic production reporting. */
 export interface ProductionReportConfig {
   /** HTTP endpoint that receives monitor snapshots. */
   endpoint: string;
   /** Reporting interval in milliseconds. */
   interval: number;
+  /** Additional HTTP headers, including authorization or tenant headers. */
+  headers?: Record<string, string>;
+  /** Custom report transport. Defaults to an HTTP POST through `fetch`. */
+  transport?: ProductionReportTransport;
+  /** Maximum delivery time in milliseconds. Omit to disable timeouts. */
+  timeout?: number;
+  /** Optional policy for retrying failed or timed-out deliveries. */
+  retry?: ProductionReportRetryPolicy;
   /**
    * Optional mapper used to customize the payload before it is posted. It receives the full,
    * potentially sensitive snapshot; without it, the reporter sends only bounded aggregates.
@@ -58,7 +95,7 @@ export interface MonitorConfig {
         events?: boolean | Partial<EventCollectorConfig>;
         webVitals?: boolean | Partial<WebVitalsCollectorConfig>;
       };
-  /** Reserved for future sampling support. */
+  /** Per-monitor sampling probability from 0 to 1. Defaults to 1. */
   sampleRate?: number;
   /** Maximum number of retained entries per collector history. Use 0 to disable history. Defaults to 120. */
   maxHistory?: number;

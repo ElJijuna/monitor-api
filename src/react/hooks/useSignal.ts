@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type SSignal from 'ssignal';
 
 /**
@@ -8,9 +8,8 @@ import type SSignal from 'ssignal';
  * rendering while keeping React components in sync with monitor signals.
  */
 export function useSignal<T>(signal: SSignal<T>): T {
-  return useSyncExternalStore(
-    (notify) => signal.subscribe(() => notify()),
-    () => signal.value,
-    () => signal.value,
-  );
+  const subscribe = useCallback((notify: () => void) => signal.subscribe(() => notify()), [signal]);
+  const getSnapshot = useCallback(() => signal.value, [signal]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
