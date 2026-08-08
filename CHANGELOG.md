@@ -1,3 +1,11 @@
+# [1.3.0](https://github.com/ElJijuna/monitor-api/compare/v1.2.0...v1.3.0) (2026-08-08)
+
+
+### Features
+
+* add sampling support and production reporting enhancements, including custom transport and retry policies ([aed3b25](https://github.com/ElJijuna/monitor-api/commit/aed3b2582b6d6f73acc9cc147e3e87027dbe6691))
+* enhance EventCollector to validate and limit event data, improving data integrity and isolation ([4d8c7aa](https://github.com/ElJijuna/monitor-api/commit/4d8c7aaa94cabbb9a5ce959670076149d4cac4da))
+
 # [1.2.0](https://github.com/ElJijuna/monitor-api/compare/v1.1.1...v1.2.0) (2026-08-07)
 
 
