@@ -3,13 +3,16 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * *' # ⏰ Ejecuta todos los días a las 6:00 AM UTC
+
+permissions: {}
+
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: ElJijuna/web-audit-action@v2.2.0
+      - uses: ElJijuna/web-audit-action@313828a7f31ed893a46db6a6812ebfa8db733ed2 # v2.2.0
         with:
           runtime: npm
           token: ${{ secrets.REPORTS_AUTOMATED }}
           db_repo: ReportsAutomated
-
