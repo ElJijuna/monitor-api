@@ -657,11 +657,14 @@ monitor-api/
 ```sh
 npm run typecheck
 npm test
+npm run test:browser
 npm run build
 npm run docs:build
 npm run bench
 ```
 
+- `demo` builds the package and serves the live browser demo at `http://127.0.0.1:4177`.
+- `test:browser` builds the package and runs the Playwright demo smoke test in Chromium.
 - `docs:build` generates TypeDoc HTML in `docs/`.
 - `bench` builds the package and runs runtime benchmarks from `bench/`.
 - Benchmark notes are tracked in `BENCH.md`.

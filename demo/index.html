@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>monitor-api demo</title>
+    <link rel="stylesheet" href="/demo/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "monitor-api": "/dist/index.js",
+          "ssignal": "/node_modules/ssignal/lib/ssignal.es.js",
+          "web-vitals": "/node_modules/web-vitals/dist/web-vitals.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="header">
+        <div>
+          <p class="eyebrow">Live instrumentation</p>
+          <h1>monitor-api demo</h1>
+        </div>
+        <div class="status">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-text">starting</span>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="Monitor snapshot">
+        <article class="metric">
+          <span>FPS</span>
+          <strong id="fps">0</strong>
+        </article>
+        <article class="metric">
+          <span>Network 5s</span>
+          <strong id="network-count">0</strong>
+        </article>
+        <article class="metric">
+          <span>Events</span>
+          <strong id="event-count">0</strong>
+        </article>
+        <article class="metric">
+          <span>Errors</span>
+          <strong id="error-count">0</strong>
+        </article>
+        <article class="metric">
+          <span>Reporter</span>
+          <strong id="reporter-sent">0</strong>
+        </article>
+        <article class="metric">
+          <span>CLS</span>
+          <strong id="cls">0</strong>
+        </article>
+      </section>
+
+      <section class="controls" aria-label="Actions">
+        <button id="event-button" type="button">Record event</button>
+        <button id="fetch-button" type="button">Run fetch</button>
+        <button id="xhr-button" type="button">Run XHR</button>
+        <button id="error-button" type="button">Capture error</button>
+        <button id="flush-button" type="button">Flush report</button>
+      </section>
+
+      <section class="panel">
+        <h2>Recent activity</h2>
+        <ol id="activity" aria-live="polite"></ol>
+      </section>
+    </main>
+
+    <script type="module" src="/demo/main.js"></script>
+  </body>
+</html>
