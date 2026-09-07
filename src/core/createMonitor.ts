@@ -1,26 +1,29 @@
 import { computed } from 'ssignal';
+import { ErrorCollector } from '../collectors/ErrorCollector';
 import { EventCollector } from '../collectors/EventCollector';
 import { NetworkCollector } from '../collectors/NetworkCollector';
 import { PerformanceCollector } from '../collectors/PerformanceCollector';
 import { ReactCollector } from '../collectors/ReactCollector';
 import { WebVitalsCollector } from '../collectors/WebVitalsCollector';
 import {
+  createDisabledErrorCollector,
   createDisabledEventCollector,
   createDisabledNetworkCollector,
   createDisabledPerformanceCollector,
   createDisabledReactCollector,
   createDisabledWebVitalsCollector,
 } from './createDisabledCollectors';
+import { createReporter, validateReportConfig } from './createReporter';
+import { validateMaxHistory } from './retainHistory';
 import type {
   CollectorName,
+  ErrorCollectorConfig,
   EventCollectorConfig,
   Monitor,
   MonitorConfig,
   MonitorSnapshot,
   NetworkCollectorConfig,
   PerformanceCollectorConfig,
-  ProductionReportConfig,
-  ProductionReportRequest,
   ReactCollectorConfig,
   WebVitalsCollectorConfig,
 } from './types';
@@ -54,6 +57,11 @@ function createDefaultReportPayload(snap: MonitorSnapshot) {
     events: {
       count: snap.events.entries.length,
     },
+    errors: {
+      totalErrors: snap.errors.totalErrors,
+      droppedErrors: snap.errors.droppedErrors,
+      retainedErrors: snap.errors.entries.length,
+    },
     webVitals: {
       cls: summarizeWebVital(snap.webVitals.cls),
       fcp: summarizeWebVital(snap.webVitals.fcp),
@@ -62,82 +70,6 @@ function createDefaultReportPayload(snap: MonitorSnapshot) {
       ttfb: summarizeWebVital(snap.webVitals.ttfb),
     },
   };
-}
-
-async function deliverReport(
-  report: ProductionReportConfig,
-  request: Omit<ProductionReportRequest, 'signal'>,
-): Promise<void> {
-  const maxAttempts = report.retry?.maxAttempts ?? 1;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await deliverReportAttempt(report, request);
-
-      return;
-    } catch (error) {
-      const shouldRetry =
-        attempt < maxAttempts && (report.retry?.shouldRetry?.(error, attempt) ?? true);
-
-      if (!shouldRetry) {
-        throw error;
-      }
-
-      const configuredDelay = report.retry?.delay ?? 0;
-      const delay =
-        typeof configuredDelay === 'function' ? configuredDelay(attempt, error) : configuredDelay;
-
-      if (delay > 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, delay));
-      }
-    }
-  }
-}
-
-async function deliverReportAttempt(
-  report: ProductionReportConfig,
-  request: Omit<ProductionReportRequest, 'signal'>,
-): Promise<void> {
-  const abortController = report.timeout === undefined ? undefined : new AbortController();
-  const requestWithSignal: ProductionReportRequest = abortController
-    ? { ...request, signal: abortController.signal }
-    : request;
-  const delivery = report.transport
-    ? Promise.resolve(report.transport(requestWithSignal))
-    : fetch(request.endpoint, {
-        method: 'POST',
-        headers: request.headers,
-        body: request.body,
-        ...(abortController ? { signal: abortController.signal } : {}),
-      }).then((response) => {
-        if (!response.ok) {
-          throw new Error(`Report delivery failed with HTTP ${response.status}`);
-        }
-      });
-
-  if (report.timeout === undefined) {
-    await delivery;
-
-    return;
-  }
-
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  try {
-    await Promise.race([
-      delivery,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          abortController?.abort();
-          reject(new Error('Report delivery timed out'));
-        }, report.timeout);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
-  }
 }
 
 function excludeReportEndpoint(
@@ -192,31 +124,6 @@ function resolveSampleRate(value: number | undefined): number {
   return value;
 }
 
-function validateReportConfig(report: ProductionReportConfig | undefined): void {
-  if (!report) {
-    return;
-  }
-
-  if (report.timeout !== undefined && (!Number.isFinite(report.timeout) || report.timeout < 0)) {
-    throw new RangeError('report.timeout must be a finite non-negative number');
-  }
-
-  if (
-    report.retry &&
-    (!Number.isInteger(report.retry.maxAttempts) || report.retry.maxAttempts < 1)
-  ) {
-    throw new RangeError('report.retry.maxAttempts must be a positive integer');
-  }
-
-  if (
-    report.retry?.delay !== undefined &&
-    typeof report.retry.delay === 'number' &&
-    (!Number.isFinite(report.retry.delay) || report.retry.delay < 0)
-  ) {
-    throw new RangeError('report.retry.delay must be a finite non-negative number');
-  }
-}
-
 /**
  * Creates a monitor instance with performance, network, React, custom event,
  * and Web Vitals collectors.
@@ -238,6 +145,20 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   validateReportConfig(config.report);
 
   const maxHistory = config.maxHistory ?? 120;
+
+  validateMaxHistory(maxHistory);
+  if (config.collectors && !Array.isArray(config.collectors)) {
+    for (const collector of Object.values(config.collectors)) {
+      if (
+        typeof collector === 'object' &&
+        collector !== null &&
+        collector.maxHistory !== undefined
+      ) {
+        validateMaxHistory(collector.maxHistory);
+      }
+    }
+  }
+
   const env = config.env ?? 'development';
   const sampleRate = resolveSampleRate(config.sampleRate);
   const sampledIn = sampleRate >= 1 || (sampleRate > 0 && Math.random() < sampleRate);
@@ -249,6 +170,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   };
   const reactConfig: ReactCollectorConfig = { maxHistory, slowThreshold: 16 };
   const eventsConfig: EventCollectorConfig = { maxHistory };
+  const errorsConfig: ErrorCollectorConfig = { maxHistory };
   const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true };
 
   const perfCfg = resolveCollector('performance', config, perfConfig);
@@ -258,6 +180,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   );
   const reactCfg = resolveCollector('react', config, reactConfig);
   const eventsCfg = resolveCollector('events', config, eventsConfig);
+  const errorsCfg = config.collectors ? resolveCollector('errors', config, errorsConfig) : false;
   const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig);
 
   const active = {
@@ -265,6 +188,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network: sampledIn && netCfg !== false,
     react: sampledIn && reactCfg !== false,
     events: sampledIn && eventsCfg !== false,
+    errors: sampledIn && errorsCfg !== false,
     webVitals: sampledIn && webVitalsCfg !== false,
   };
 
@@ -278,6 +202,8 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     active.react && reactCfg ? new ReactCollector(reactCfg) : createDisabledReactCollector();
   const events =
     active.events && eventsCfg ? new EventCollector(eventsCfg) : createDisabledEventCollector();
+  const errors =
+    active.errors && errorsCfg ? new ErrorCollector(errorsCfg) : createDisabledErrorCollector();
   const webVitals =
     active.webVitals && webVitalsCfg
       ? new WebVitalsCollector(webVitalsCfg)
@@ -288,6 +214,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     ...(active.network ? [network.snapshot] : []),
     ...(active.react ? [react.snapshot] : []),
     ...(active.events ? [events.snapshot] : []),
+    ...(active.errors ? [errors.snapshot] : []),
     ...(active.webVitals ? [webVitals.snapshot] : []),
   ];
 
@@ -299,58 +226,25 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       network: network.snapshot.value,
       react: react.snapshot.value,
       events: events.snapshot.value,
+      errors: errors.snapshot.value,
       webVitals: webVitals.snapshot.value,
     }),
   );
 
-  let reporterInterval: ReturnType<typeof setInterval> | null = null;
-  let reporterInFlight = false;
+  let destroyed = false;
+  const reporter = createReporter(config.report, sampledIn && env === 'production', () => {
+    const snap = signal.value;
 
-  function startReporter() {
-    const report = config.report;
-
-    if (!sampledIn || env !== 'production' || !report || reporterInterval !== null) {
-      return;
-    }
-
-    if (typeof fetch === 'undefined' && !report.transport) {
-      return;
-    }
-
-    const { endpoint, headers: configuredHeaders, interval, transform } = report;
-    const headers = { 'Content-Type': 'application/json', ...configuredHeaders };
-
-    reporterInterval = setInterval(() => {
-      if (reporterInFlight) {
-        return;
-      }
-
-      try {
-        const snap = signal.value;
-        const payload = transform ? transform(snap) : createDefaultReportPayload(snap);
-        const body = JSON.stringify(payload);
-
-        reporterInFlight = true;
-        void deliverReport(report, { endpoint, payload, body, headers })
-          .catch(() => {})
-          .finally(() => {
-            reporterInFlight = false;
-          });
-      } catch {
-        reporterInFlight = false;
-        // Monitoring must never break the host application.
-      }
-    }, interval);
-  }
-
-  function stopReporter() {
-    if (reporterInterval !== null) {
-      clearInterval(reporterInterval);
-      reporterInterval = null;
-    }
-  }
+    return config.report?.transform
+      ? config.report.transform(snap)
+      : createDefaultReportPayload(snap);
+  });
 
   function startAll() {
+    if (destroyed) {
+      return;
+    }
+
     if (active.performance) {
       performance.start();
     }
@@ -367,11 +261,15 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       events.start();
     }
 
+    if (active.errors) {
+      errors.start();
+    }
+
     if (active.webVitals) {
       webVitals.start();
     }
 
-    startReporter();
+    reporter.start();
   }
 
   function stopAll() {
@@ -379,25 +277,34 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     network.stop();
     react.stop();
     events.stop();
+    errors.stop();
     webVitals.stop();
-    stopReporter();
+    reporter.stop();
   }
 
   function destroyAll() {
-    stopReporter();
+    if (destroyed) {
+      return;
+    }
+
+    destroyed = true;
+    reporter.destroy();
     performance.destroy();
     network.destroy();
     react.destroy();
     events.destroy();
+    errors.destroy();
     webVitals.destroy();
     signal.dispose();
   }
 
   const monitor: Monitor = {
+    reporter,
     performance,
     network,
     react,
     events,
+    errors,
     webVitals,
     signal,
     getSnapshot: () => signal.value,

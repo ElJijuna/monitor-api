@@ -1,5 +1,5 @@
-import SSignal, { computed } from 'ssignal';
-import { appendHistory } from '../core/retainHistory';
+import SSignal, { type ComputedSignal, computed } from 'ssignal';
+import { appendHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   EventCollectorConfig,
   EventSnapshot,
@@ -89,7 +89,8 @@ function normalizeLimit(value: number | undefined, fallback: number): number {
 }
 
 export class EventCollector implements IEventCollector {
-  readonly snapshot: SSignal<EventSnapshot>;
+  #destroyed = false;
+  readonly snapshot: ComputedSignal<EventSnapshot>;
   readonly onEvent: SSignal<MonitorEvent | null>;
 
   #entries: SSignal<MonitorEvent[]>;
@@ -99,6 +100,7 @@ export class EventCollector implements IEventCollector {
   #listener: ((e: Event) => void) | null = null;
 
   constructor(private readonly config: EventCollectorConfig) {
+    validateMaxHistory(config.maxHistory);
     this.#maxLabelLength = normalizeLimit(config.maxLabelLength, DEFAULT_MAX_LABEL_LENGTH);
     this.#maxDataDepth = normalizeLimit(config.maxDataDepth, DEFAULT_MAX_DATA_DEPTH);
     this.#maxDataBytes = normalizeLimit(config.maxDataBytes, DEFAULT_MAX_DATA_BYTES);
@@ -115,6 +117,10 @@ export class EventCollector implements IEventCollector {
   }
 
   start(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
     if (typeof window === 'undefined') {
       return;
     }
@@ -135,7 +141,13 @@ export class EventCollector implements IEventCollector {
   }
 
   destroy(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
+    this.#destroyed = true;
     this.stop();
+    this.snapshot.dispose();
   }
 
   clearLog(): void {
@@ -168,6 +180,10 @@ export class EventCollector implements IEventCollector {
   }
 
   #record(label: string, data: Record<string, unknown> | null): void {
+    if (this.#destroyed || typeof label !== 'string') {
+      return;
+    }
+
     if (label.length === 0 || label.length > this.#maxLabelLength) {
       return;
     }

@@ -1,5 +1,6 @@
 import SSignal from 'ssignal';
 import type {
+  IErrorCollector,
   IEventCollector,
   INetworkCollector,
   IPerformanceCollector,
@@ -7,6 +8,7 @@ import type {
   IWebVitalsCollector,
   LongTaskInfo,
   MemoryInfo,
+  MonitorError,
   MonitorEvent,
   NetworkEntry,
   PerformanceSnapshot,
@@ -89,6 +91,18 @@ export function createDisabledEventCollector(): IEventCollector {
     snapshot: new SSignal({ entries: [], byLabel: {} }),
     onEvent: new SSignal<MonitorEvent | null>(null),
     emit: noop,
+    clearLog: noop,
+    start: noop,
+    stop: noop,
+    destroy: noop,
+  };
+}
+
+export function createDisabledErrorCollector(): IErrorCollector {
+  return {
+    snapshot: new SSignal({ entries: [], totalErrors: 0, droppedErrors: 0 }),
+    onError: new SSignal<MonitorError | null>(null),
+    capture: noop,
     clearLog: noop,
     start: noop,
     stop: noop,

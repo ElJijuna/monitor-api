@@ -9,14 +9,14 @@
 [![GitHub stars](https://img.shields.io/github/stars/ElJijuna/monitor-api)](https://github.com/ElJijuna/monitor-api/stargazers)
 
 Lightweight, **signal-based** web app monitoring library.  
-Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, and custom events — all reactive via [ssignal](https://github.com/ElJijuna/ssignal).
+Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, custom events, and optional errors — all reactive via [ssignal](https://github.com/ElJijuna/ssignal).
 
 ## Features
 
 - **Signal-based** — subscribe to exactly what you need, no polling
-- **5 collectors** — Performance, Network, React, Events, Web Vitals
+- **6 collectors** — Performance, Network, React, Events, optional Errors, Web Vitals
 - **Web Vitals** — CLS, FCP, INP, LCP, and TTFB via `web-vitals`
-- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useWebVitals`
+- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useWebVitals`
 - **Zero config** — works out of the box, tree-shakeable
 - **SSR safe** — browser collectors no-op outside the browser
 - **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
@@ -61,7 +61,7 @@ Creates and returns a `Monitor` instance. Does **not** start collecting — call
 import { createMonitor } from 'monitor-api'
 
 const monitor = createMonitor({
-  collectors: ['performance', 'network', 'react', 'events', 'webVitals'], // default: all
+  collectors: ['performance', 'network', 'react', 'events', 'webVitals'], // default collectors
   sampleRate: 1,          // per-monitor sampling probability from 0 to 1 (default: 1)
   maxHistory: 120,       // data points kept per metric; 0 disables history (default: 120)
   networkFilter: (url) => !url.includes('analytics'),        // optional
@@ -90,6 +90,7 @@ apps.
 - Multiple monitor instances share network and React global hooks; the last active instance restores them.
 - Histories are bounded by `maxHistory`.
 - Custom event payloads are copied before retention and bounded by depth and UTF-8 byte size.
+- Error collection is opt-in. Default reporting sends only error counts, not messages or stacks.
 - Production reporting starts only after `monitor.start()` and requires either
   `fetch` or a custom transport.
 
@@ -383,6 +384,48 @@ interface WebVitalMetric {
 
 ---
 
+### ErrorCollector
+
+Error collection is disabled by default because error messages and stacks can
+include user data. Enable it explicitly with `collectors: ['errors']` or
+`collectors: { errors: true }`.
+
+```ts
+const monitor = createMonitor({
+  collectors: {
+    errors: {
+      maxHistory: 20,
+      sanitize: (details) => ({
+        ...details,
+        message: details.message.replace(/token=[^ ]+/g, 'token=[redacted]'),
+        stack: null,
+      }),
+    },
+  },
+})
+
+monitor.start()
+
+monitor.errors.onError.subscribe((entry) => {
+  if (!entry) return
+  console.log(`[${entry.source}] ${entry.details.name}: ${entry.details.message}`)
+})
+
+try {
+  await loadDashboard()
+} catch (error) {
+  monitor.errors.capture(error)
+}
+```
+
+The collector listens for browser `error` and `unhandledrejection` events while
+started, and `capture(error)` can be used manually in any environment.
+Consecutive matching errors inside `dedupWindow` are folded into one entry with
+an `occurrences` count. `clearLog()` removes retained entries but preserves
+lifetime counters.
+
+---
+
 ## Unified snapshot
 
 Subscribe to all collectors at once:
@@ -395,6 +438,7 @@ monitor.subscribe((snap) => {
   console.log('  LCP:', snap.webVitals.lcp?.value ?? 'n/a')
   console.log('  React commits:', snap.react.totalCommits)
   console.log('  Custom events:', snap.events.entries.length)
+  console.log('  Errors:', snap.errors.totalErrors)
 })
 
 // Or read synchronously
@@ -407,7 +451,7 @@ const snap = monitor.getSnapshot()
 
 ```tsx
 import { createMonitor } from 'monitor-api'
-import { useSignal, usePerformance, useNetwork, useReact, useEvents, useWebVitals } from 'monitor-api/react'
+import { useSignal, usePerformance, useNetwork, useReact, useEvents, useErrors, useWebVitals } from 'monitor-api/react'
 
 const monitor = createMonitor()
 monitor.start()
@@ -474,6 +518,20 @@ function WebVitalsPanel() {
     </div>
   )
 }
+
+function ErrorPanel() {
+  const { totalErrors, entries } = useErrors(monitor)
+  return (
+    <div>
+      <p>Total errors: {totalErrors}</p>
+      <ul>
+        {entries.slice(-5).map(e => (
+          <li key={e.id}>{e.details.name}: {e.details.message}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 ```
 
 ---
@@ -497,6 +555,7 @@ const monitor = createMonitor({
       fps: snap.performance.fps,
       memory: snap.performance.memory?.percent ?? null,
       errorRate: snap.network.window5s.errorRate,
+      errors: snap.errors.totalErrors,
       webVitals: {
         cls: snap.webVitals.cls,
         inp: snap.webVitals.inp,
@@ -521,10 +580,16 @@ start.
 Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
 snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;
 the five-second network aggregate; React commit counts; the retained custom-event
-count; and Web Vital values, deltas, and ratings. It does not send request URLs,
-errors, histories, event labels or data, component names, Web Vital IDs, or
-navigation types. The reporter endpoint is also excluded from NetworkCollector,
-while any configured network filter continues to apply.
+count; retained error counters; and Web Vital values, deltas, and ratings. It
+does not send request URLs, error messages or stacks, histories, event labels or
+data, component names, Web Vital IDs, or navigation types. The reporter endpoint
+is also excluded from NetworkCollector, while any configured network filter
+continues to apply.
+
+`monitor.reporter.snapshot` exposes delivery diagnostics such as `sent`,
+`failed`, `dropped`, `retries`, `cancelled`, `skipped`, and `lastFailure`.
+`monitor.reporter.flush()` triggers an immediate best-effort delivery while the
+monitor is started.
 
 `transform` is an explicit opt-in to a custom payload and receives the full
 snapshot, including potentially sensitive application data. Redact secrets and
@@ -537,7 +602,7 @@ bound the returned payload before enabling it in production.
 ```ts
 createMonitor({
   // Enable only specific collectors
-  collectors: ['performance', 'network'],
+  collectors: ['performance', 'network', 'errors'],
 
   // Or configure each individually
   collectors: {
@@ -552,6 +617,10 @@ createMonitor({
       maxLabelLength: 256,          // default 256 characters
       maxDataDepth: 5,             // default 5 nested object/array levels
       maxDataBytes: 16 * 1024,     // default 16 KiB of UTF-8 JSON
+    },
+    errors: {
+      dedupWindow: 1000,            // default 1000ms
+      sanitize: (details) => details,
     },
     webVitals: { reportAllChanges: true },
   },

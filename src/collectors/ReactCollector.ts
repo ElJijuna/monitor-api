@@ -1,5 +1,5 @@
-import SSignal, { computed } from 'ssignal';
-import { appendHistory } from '../core/retainHistory';
+import SSignal, { type ComputedSignal, computed } from 'ssignal';
+import { appendHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   ComponentStats,
   IReactCollector,
@@ -175,7 +175,8 @@ function normalizeMaxFiberVisits(value: number | undefined): number {
 }
 
 export class ReactCollector implements IReactCollector {
-  readonly snapshot: SSignal<ReactSnapshot>;
+  #destroyed = false;
+  readonly snapshot: ComputedSignal<ReactSnapshot>;
   readonly onCommit: SSignal<RenderEntry | null>;
 
   #entries: SSignal<RenderEntry[]>;
@@ -188,6 +189,7 @@ export class ReactCollector implements IReactCollector {
   #teardown: (() => void) | null = null;
 
   constructor(private readonly config: ReactCollectorConfig) {
+    validateMaxHistory(config.maxHistory);
     this.#slowThreshold = config.slowThreshold;
     this.#maxFiberVisits = normalizeMaxFiberVisits(config.maxFiberVisits);
     this.#entries = new SSignal<RenderEntry[]>([]);
@@ -210,6 +212,10 @@ export class ReactCollector implements IReactCollector {
   }
 
   start(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
     if (typeof window === 'undefined') {
       return;
     }
@@ -231,7 +237,13 @@ export class ReactCollector implements IReactCollector {
   }
 
   destroy(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
+    this.#destroyed = true;
     this.stop();
+    this.snapshot.dispose();
   }
 
   setSlowThreshold(ms: number): void {

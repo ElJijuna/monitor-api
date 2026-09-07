@@ -1,7 +1,7 @@
-import SSignal, { computed } from 'ssignal';
+import SSignal, { type ComputedSignal, computed } from 'ssignal';
 import type { MetricType } from 'web-vitals';
 import { onCLS, onFCP, onINP, onLCP, onTTFB } from 'web-vitals';
-import { appendHistory } from '../core/retainHistory';
+import { appendHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   IWebVitalsCollector,
   WebVitalMetric,
@@ -20,7 +20,8 @@ const emptySnapshot = (): WebVitalsSnapshot => ({
 });
 
 export class WebVitalsCollector implements IWebVitalsCollector {
-  readonly snapshot: SSignal<WebVitalsSnapshot>;
+  #destroyed = false;
+  readonly snapshot: ComputedSignal<WebVitalsSnapshot>;
   readonly onMetric: SSignal<WebVitalMetric | null>;
 
   #snapshot: SSignal<WebVitalsSnapshot>;
@@ -28,6 +29,7 @@ export class WebVitalsCollector implements IWebVitalsCollector {
   #registered = false;
 
   constructor(private readonly config: WebVitalsCollectorConfig) {
+    validateMaxHistory(config.maxHistory);
     this.#snapshot = new SSignal<WebVitalsSnapshot>(emptySnapshot());
     this.onMetric = new SSignal<WebVitalMetric | null>(null);
 
@@ -35,6 +37,10 @@ export class WebVitalsCollector implements IWebVitalsCollector {
   }
 
   start(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
     if (typeof window === 'undefined') {
       return;
     }
@@ -63,7 +69,13 @@ export class WebVitalsCollector implements IWebVitalsCollector {
   }
 
   destroy(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
+    this.#destroyed = true;
     this.stop();
+    this.snapshot.dispose();
   }
 
   clearLog(): void {

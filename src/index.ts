@@ -4,20 +4,27 @@ export { createMonitor } from './core/createMonitor';
 export type {
   CollectorName,
   ComponentStats,
+  ErrorCollectorConfig,
+  ErrorSnapshot,
   EventCollectorConfig,
   // Events
   EventSnapshot,
+  IErrorCollector,
   IEventCollector,
   INetworkCollector,
   // Collector interfaces
   IPerformanceCollector,
   IReactCollector,
+  IReporter,
   IWebVitalsCollector,
   LongTaskInfo,
   MemoryInfo,
   // Core
   Monitor,
   MonitorConfig,
+  MonitorError,
+  MonitorErrorDetails,
+  MonitorErrorSource,
   MonitorEvent,
   MonitorSnapshot,
   NetworkCollectorConfig,
@@ -37,6 +44,8 @@ export type {
   ReactSnapshot,
   RenderEntry,
   RenderPhase,
+  ReporterSnapshot,
+  ReportFailure,
   WebVitalMetric,
   // Web Vitals
   WebVitalName,

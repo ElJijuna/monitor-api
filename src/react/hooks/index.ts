@@ -1,3 +1,4 @@
+export { useErrors } from './useErrors';
 export { useEvents } from './useEvents';
 export { useMonitor } from './useMonitor';
 export { useNetwork } from './useNetwork';

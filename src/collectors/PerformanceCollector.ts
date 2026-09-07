@@ -1,5 +1,5 @@
-import SSignal, { computed } from 'ssignal';
-import { appendHistory } from '../core/retainHistory';
+import SSignal, { type ComputedSignal, computed } from 'ssignal';
+import { appendHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   IPerformanceCollector,
   LongTaskInfo,
@@ -19,13 +19,14 @@ declare global {
 }
 
 export class PerformanceCollector implements IPerformanceCollector {
+  #destroyed = false;
   readonly fps: SSignal<number>;
   readonly fpsHistory: SSignal<number[]>;
   readonly memory: SSignal<MemoryInfo | null>;
   readonly memoryHistory: SSignal<number[]>;
   readonly longTasks: SSignal<LongTaskInfo>;
   readonly cls: SSignal<number>;
-  readonly snapshot: SSignal<PerformanceSnapshot>;
+  readonly snapshot: ComputedSignal<PerformanceSnapshot>;
 
   #rafId: number | null = null;
   #frameCount = 0;
@@ -34,8 +35,13 @@ export class PerformanceCollector implements IPerformanceCollector {
   #clsObserver: PerformanceObserver | null = null;
   #memoryInterval: ReturnType<typeof setInterval> | null = null;
   #started = false;
+  #generation = 0;
+  #clsSessionValue = 0;
+  #clsSessionStart = 0;
+  #clsLastShift = 0;
 
   constructor(private readonly config: PerformanceCollectorConfig) {
+    validateMaxHistory(config.maxHistory);
     this.fps = new SSignal(0);
     this.fpsHistory = new SSignal<number[]>([]);
     this.memory = new SSignal<MemoryInfo | null>(this.#readMemory());
@@ -57,11 +63,19 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   start(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
     if (typeof window === 'undefined' || this.#started) {
       return;
     }
 
     this.#started = true;
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.#onVisibilityChange);
+    }
+
     this.#startFps();
     this.#startMemory();
     this.#startLongTasks();
@@ -70,6 +84,12 @@ export class PerformanceCollector implements IPerformanceCollector {
 
   stop(): void {
     this.#started = false;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.#onVisibilityChange);
+    }
+
+    this.#generation += 1;
+    this.#clsSessionValue = 0;
     this.#frameCount = 0;
     this.#lastFpsTime = 0;
 
@@ -90,7 +110,13 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   destroy(): void {
+    if (this.#destroyed) {
+      return;
+    }
+
+    this.#destroyed = true;
     this.stop();
+    this.snapshot.dispose();
   }
 
   clearHistory(): void {
@@ -99,7 +125,24 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   #startFps(): void {
+    if (typeof requestAnimationFrame !== 'function' || typeof cancelAnimationFrame !== 'function') {
+      return;
+    }
+
+    const generation = this.#generation;
     const loop = (time: number) => {
+      if (!this.#started || generation !== this.#generation) {
+        return;
+      }
+
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        this.#lastFpsTime = 0;
+        this.#frameCount = 0;
+        this.#rafId = requestAnimationFrame(loop);
+
+        return;
+      }
+
       if (this.#lastFpsTime === 0) {
         this.#lastFpsTime = time;
         this.#frameCount = 0;
@@ -121,14 +164,25 @@ export class PerformanceCollector implements IPerformanceCollector {
           appendHistory(prev, [fps], this.config.maxHistory);
       }
 
-      this.#rafId = requestAnimationFrame(loop);
+      if (this.#started && generation === this.#generation) {
+        this.#rafId = requestAnimationFrame(loop);
+      }
     };
 
     this.#rafId = requestAnimationFrame(loop);
   }
 
+  #onVisibilityChange = (): void => {
+    this.#lastFpsTime = 0;
+    this.#frameCount = 0;
+  };
+
   #startMemory(): void {
     const update = () => {
+      if (!this.#started) {
+        return;
+      }
+
       const mem = this.#readMemory();
 
       this.memory.value = mem;
@@ -142,8 +196,14 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   #startLongTasks(): void {
+    const generation = this.#generation;
+
     try {
       this.#longTaskObserver = new PerformanceObserver((list) => {
+        if (!this.#started || generation !== this.#generation) {
+          return;
+        }
+
         for (const entry of list.getEntries()) {
           this.longTasks.value = (prev: LongTaskInfo) => ({
             count: prev.count + 1,
@@ -158,13 +218,31 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   #startCls(): void {
+    const generation = this.#generation;
+
     try {
       this.#clsObserver = new PerformanceObserver((list) => {
+        if (!this.#started || generation !== this.#generation) {
+          return;
+        }
+
         for (const entry of list.getEntries()) {
           const ls = entry as PerformanceEntry & { value: number; hadRecentInput: boolean };
 
           if (!ls.hadRecentInput) {
-            this.cls.value = (prev: number) => prev + ls.value;
+            if (
+              this.#clsSessionValue > 0 &&
+              ls.startTime - this.#clsLastShift < 1000 &&
+              ls.startTime - this.#clsSessionStart < 5000
+            ) {
+              this.#clsSessionValue += ls.value;
+            } else {
+              this.#clsSessionStart = ls.startTime;
+              this.#clsSessionValue = ls.value;
+            }
+
+            this.#clsLastShift = ls.startTime;
+            this.cls.value = Math.max(this.cls.value, this.#clsSessionValue);
           }
         }
       });

@@ -1,4 +1,5 @@
 export {
+  useErrors,
   useEvents,
   useMonitor,
   useNetwork,

@@ -1,4 +1,5 @@
 import type SSignal from 'ssignal';
+import type { ErrorCollectorConfig, ErrorSnapshot, IErrorCollector } from './errors';
 import type { EventCollectorConfig, EventSnapshot, IEventCollector } from './events';
 import type { INetworkCollector, NetworkCollectorConfig, NetworkSnapshot } from './network';
 import type {
@@ -21,6 +22,8 @@ export interface MonitorSnapshot {
   react: ReactSnapshot;
   /** Custom application events emitted through the monitor event API. */
   events: EventSnapshot;
+  /** Optional captured JavaScript errors. Disabled by default. */
+  errors: ErrorSnapshot;
   /** Standard Web Vitals metrics collected from the browser. */
   webVitals: WebVitalsSnapshot;
 }
@@ -35,7 +38,7 @@ export interface ProductionReportRequest {
   body: string;
   /** Final headers after applying monitor defaults and user overrides. */
   headers: Readonly<Record<string, string>>;
-  /** Aborted when the configured report timeout elapses. */
+  /** Aborted on timeout, stop, or destroy. Custom transports should honor cancellation. */
   signal?: AbortSignal;
 }
 
@@ -66,6 +69,8 @@ export interface ProductionReportConfig {
   transport?: ProductionReportTransport;
   /** Maximum delivery time in milliseconds. Omit to disable timeouts. */
   timeout?: number;
+  /** Maximum UTF-8 JSON body size. Defaults to 65,536 bytes, including custom payloads. */
+  maxPayloadBytes?: number;
   /** Optional policy for retrying failed or timed-out deliveries. */
   retry?: ProductionReportRetryPolicy;
   /**
@@ -75,8 +80,37 @@ export interface ProductionReportConfig {
   transform?: (snap: MonitorSnapshot) => unknown;
 }
 
+/** Safe diagnostic categories. Raw transport errors and credentials are never retained here. */
+export type ReportFailure =
+  | 'transform'
+  | 'serialization'
+  | 'payload-too-large'
+  | 'transport'
+  | 'timeout';
+
+/** Cumulative reporter counters for this monitor's lifetime. */
+export interface ReporterSnapshot {
+  status: 'disabled' | 'stopped' | 'idle' | 'sending' | 'retrying' | 'destroyed';
+  attempts: number;
+  sent: number;
+  failed: number;
+  dropped: number;
+  retries: number;
+  cancelled: number;
+  skipped: number;
+  lastSuccessAt: number | null;
+  lastFailure: ReportFailure | null;
+}
+
+/** Delivery diagnostics and explicit best-effort delivery. */
+export interface IReporter {
+  readonly snapshot: SSignal<ReporterSnapshot>;
+  /** Sends now while started. Concurrent calls share one delivery. Resolves false on failure or inactivity. */
+  flush(): Promise<boolean>;
+}
+
 /** Built-in collector names accepted by {@link MonitorConfig.collectors}. */
-export type CollectorName = 'performance' | 'network' | 'react' | 'events' | 'webVitals';
+export type CollectorName = 'performance' | 'network' | 'react' | 'events' | 'webVitals' | 'errors';
 
 /** Options used when creating a monitor instance. */
 export interface MonitorConfig {
@@ -93,6 +127,7 @@ export interface MonitorConfig {
         network?: boolean | Partial<NetworkCollectorConfig>;
         react?: boolean | Partial<ReactCollectorConfig>;
         events?: boolean | Partial<EventCollectorConfig>;
+        errors?: boolean | Partial<ErrorCollectorConfig>;
         webVitals?: boolean | Partial<WebVitalsCollectorConfig>;
       };
   /** Per-monitor sampling probability from 0 to 1. Defaults to 1. */
@@ -109,6 +144,8 @@ export interface MonitorConfig {
 
 /** Runtime monitor facade returned by {@link createMonitor}. */
 export interface Monitor {
+  /** Production delivery status, counters, and manual flush. */
+  reporter: IReporter;
   /** Performance collector API. */
   performance: IPerformanceCollector;
   /** Network collector API. */
@@ -117,6 +154,8 @@ export interface Monitor {
   react: IReactCollector;
   /** Custom event collector API. */
   events: IEventCollector;
+  /** Optional error collector API. */
+  errors: IErrorCollector;
   /** Web Vitals collector API. */
   webVitals: IWebVitalsCollector;
   /** Reactive signal containing the combined monitor snapshot. */

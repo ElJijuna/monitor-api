@@ -1,3 +1,4 @@
+export type * from './errors';
 export type * from './events';
 export type * from './monitor';
 export type * from './network';

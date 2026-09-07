@@ -1,26 +1,22 @@
 import { jest } from '@jest/globals';
 import { createMonitor } from '../src/index';
 
-class FakeXMLHttpRequest {
+class FakeXMLHttpRequest extends EventTarget {
   static lastInstance: FakeXMLHttpRequest | null = null;
 
-  listeners = new Map<string, () => void>();
   responseHeaders = new Map<string, string>();
   response = '';
   status = 200;
 
   constructor() {
+    super();
     FakeXMLHttpRequest.lastInstance = this;
   }
 
   open(): void {}
 
   send(): void {
-    this.listeners.get('loadend')?.();
-  }
-
-  addEventListener(name: string, listener: () => void): void {
-    this.listeners.set(name, listener);
+    this.dispatchEvent(new Event('loadend'));
   }
 
   getResponseHeader(name: string): string | null {
@@ -75,7 +71,7 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
   expect(secondEntry).toBeDefined();
   expect(firstEntry?.method).toBe('GET');
   expect(secondEntry?.status).toBe(201);
-  expect(snapshot.window5s.count).toBe(2);
+  expect(snapshot.window5s.count).toBe(3);
   expect(snapshot.window5s.errorRate).toBe(0);
 
   monitor.destroy();
@@ -340,7 +336,7 @@ test('NetworkCollector retains no history when maxHistory is zero', async () => 
 
   expect(monitor.network.snapshot.value).toEqual({
     entries: [],
-    window5s: { count: 0, avgLatency: 0, totalPayload: 0, errorRate: 0 },
+    window5s: { count: 1, avgLatency: expect.any(Number), totalPayload: 0, errorRate: 0 },
   });
   expect(monitor.network.onRequest.value?.url).toBe('/latest');
 
@@ -627,5 +623,149 @@ test('a newer chained XHR patch keeps delegating after NetworkCollector stops', 
     monitor.destroy();
     FakeXMLHttpRequest.prototype.open = originalOpen;
     FakeXMLHttpRequest.prototype.send = originalSend;
+  }
+});
+
+test('throwing filters cannot reject a successful fetch or block another monitor', async () => {
+  const response = new Response('ok');
+  const failure = new Error('original rejection');
+  const nativeFetch = jest
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response)
+    .mockRejectedValueOnce(failure);
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch: nativeFetch },
+  });
+  const broken = createMonitor({
+    collectors: ['network'],
+    networkFilter: () => {
+      throw new Error('bad filter');
+    },
+  });
+  const healthy = createMonitor({ collectors: ['network'] });
+
+  try {
+    broken.start();
+    healthy.start();
+    await expect(window.fetch('/ok')).resolves.toBe(response);
+    await expect(window.fetch('/fail')).rejects.toBe(failure);
+    expect(healthy.network.snapshot.value.entries.map((entry) => entry.status)).toEqual([200, 0]);
+  } finally {
+    broken.destroy();
+    healthy.destroy();
+  }
+});
+
+test('reusing an XMLHttpRequest records exactly one entry per send', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest,
+  });
+  const monitor = createMonitor({ collectors: ['network'] });
+
+  try {
+    monitor.start();
+    const xhr = new XMLHttpRequest();
+
+    xhr.open('GET', '/one');
+    xhr.send();
+    xhr.open('POST', '/two');
+    xhr.send();
+    expect(
+      monitor.network.snapshot.value.entries.map((entry) => [entry.method, entry.url]),
+    ).toEqual([
+      ['GET', '/one'],
+      ['POST', '/two'],
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('failed synchronous XHR sends remove instrumentation before reuse', () => {
+  class FailingXHR extends FakeXMLHttpRequest {
+    fail = true;
+    override send(): void {
+      if (this.fail) {
+        throw new Error('send failed');
+      }
+
+      super.send();
+    }
+  }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', { configurable: true, value: FailingXHR });
+  const monitor = createMonitor({ collectors: ['network'] });
+
+  try {
+    monitor.start();
+    const xhr = new FailingXHR();
+
+    expect(() => xhr.send()).toThrow('send failed');
+    xhr.fail = false;
+    xhr.send();
+    expect(monitor.network.snapshot.value.entries).toHaveLength(1);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('requests from an earlier lifecycle do not enter a restarted monitor', async () => {
+  let finish!: (response: Response) => void;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      fetch: () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    },
+  });
+  const monitor = createMonitor({ collectors: ['network'] });
+
+  try {
+    monitor.start();
+    const pending = window.fetch('/old');
+
+    monitor.stop();
+    monitor.start();
+    finish(new Response());
+    await pending;
+    expect(monitor.network.snapshot.value.entries).toEqual([]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('window aggregates retain all traffic independently of a one-entry history', async () => {
+  jest.useFakeTimers();
+  const nativeFetch = jest
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response('', { status: 500 }))
+    .mockResolvedValue(new Response(''));
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch: nativeFetch },
+  });
+  const monitor = createMonitor({ collectors: ['network'], maxHistory: 1 });
+
+  try {
+    monitor.start();
+    await window.fetch('/failed');
+    await jest.advanceTimersByTimeAsync(1000);
+    await window.fetch('/ok');
+    expect(monitor.network.snapshot.value.entries).toHaveLength(1);
+    expect(monitor.network.snapshot.value.window5s).toMatchObject({ count: 2, errorRate: 0.5 });
+    await jest.advanceTimersByTimeAsync(4001);
+    expect(monitor.network.snapshot.value.window5s).toMatchObject({ count: 1, errorRate: 0 });
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(monitor.network.snapshot.value.window5s.count).toBe(0);
+  } finally {
+    monitor.destroy();
+    jest.useRealTimers();
   }
 });
