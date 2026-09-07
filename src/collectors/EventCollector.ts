@@ -13,6 +13,7 @@ const DEFAULT_MAX_DATA_DEPTH = 5;
 const DEFAULT_MAX_DATA_BYTES = 16 * 1024;
 
 let _idCounter = 0;
+
 const uid = () => `evt-${Date.now()}-${++_idCounter}`;
 
 function cloneEventData(

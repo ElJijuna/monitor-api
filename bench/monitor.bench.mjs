@@ -21,8 +21,14 @@ function formatNumber(value) {
 }
 
 function formatDuration(value) {
-  if (value < 0.001) return `${formatNumber(value * 1_000_000)} ns`;
-  if (value < 1) return `${formatNumber(value * 1_000)} us`;
+  if (value < 0.001) {
+    return `${formatNumber(value * 1_000_000)} ns`;
+  }
+
+  if (value < 1) {
+    return `${formatNumber(value * 1_000)} us`;
+  }
+
   return `${formatNumber(value)} ms`;
 }
 
@@ -32,7 +38,10 @@ function runLoop(fn, durationMs) {
   let elapsed = 0;
 
   do {
-    for (let i = 0; i < BATCH_SIZE; i++) fn();
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      fn();
+    }
+
     iterations += BATCH_SIZE;
     elapsed = performance.now() - start;
   } while (elapsed < durationMs);

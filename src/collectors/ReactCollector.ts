@@ -75,7 +75,6 @@ function installReactHook(): void {
   const hook = win.__REACT_DEVTOOLS_GLOBAL_HOOK__;
   const original = hook.onCommitFiberRoot;
   const originalUnmount = hook.onCommitFiberUnmount;
-
   const patched: DevToolsHook['onCommitFiberRoot'] = (
     rendererID,
     root,
@@ -88,7 +87,6 @@ function installReactHook(): void {
       listener.onCommit(rendererID, root);
     }
   };
-
   const patchedUnmount: NonNullable<DevToolsHook['onCommitFiberUnmount']> = (rendererID, fiber) => {
     originalUnmount?.call(hook, rendererID, fiber);
 

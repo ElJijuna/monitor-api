@@ -147,6 +147,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const maxHistory = config.maxHistory ?? 120;
 
   validateMaxHistory(maxHistory);
+
   if (config.collectors && !Array.isArray(config.collectors)) {
     for (const collector of Object.values(config.collectors)) {
       if (
@@ -162,7 +163,6 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const env = config.env ?? 'development';
   const sampleRate = resolveSampleRate(config.sampleRate);
   const sampledIn = sampleRate >= 1 || (sampleRate > 0 && Math.random() < sampleRate);
-
   const perfConfig: PerformanceCollectorConfig = { maxHistory };
   const netConfig: NetworkCollectorConfig = {
     maxHistory,
@@ -172,7 +172,6 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const eventsConfig: EventCollectorConfig = { maxHistory };
   const errorsConfig: ErrorCollectorConfig = { maxHistory };
   const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true };
-
   const perfCfg = resolveCollector('performance', config, perfConfig);
   const netCfg = excludeReportEndpoint(
     resolveCollector('network', config, netConfig),
@@ -182,7 +181,6 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const eventsCfg = resolveCollector('events', config, eventsConfig);
   const errorsCfg = config.collectors ? resolveCollector('errors', config, errorsConfig) : false;
   const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig);
-
   const active = {
     performance: sampledIn && perfCfg !== false,
     network: sampledIn && netCfg !== false,
@@ -191,7 +189,6 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     errors: sampledIn && errorsCfg !== false,
     webVitals: sampledIn && webVitalsCfg !== false,
   };
-
   const performance =
     active.performance && perfCfg
       ? new PerformanceCollector(perfCfg)
@@ -208,7 +205,6 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     active.webVitals && webVitalsCfg
       ? new WebVitalsCollector(webVitalsCfg)
       : createDisabledWebVitalsCollector();
-
   const snapshotSources = [
     ...(active.performance ? [performance.snapshot] : []),
     ...(active.network ? [network.snapshot] : []),
@@ -217,7 +213,6 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     ...(active.errors ? [errors.snapshot] : []),
     ...(active.webVitals ? [webVitals.snapshot] : []),
   ];
-
   const signal = computed(
     snapshotSources,
     (): MonitorSnapshot => ({
@@ -232,6 +227,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   );
 
   let destroyed = false;
+
   const reporter = createReporter(config.report, sampledIn && env === 'production', () => {
     const snap = signal.value;
 

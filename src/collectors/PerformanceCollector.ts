@@ -72,6 +72,7 @@ export class PerformanceCollector implements IPerformanceCollector {
     }
 
     this.#started = true;
+
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.#onVisibilityChange);
     }
@@ -84,6 +85,7 @@ export class PerformanceCollector implements IPerformanceCollector {
 
   stop(): void {
     this.#started = false;
+
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.#onVisibilityChange);
     }
@@ -186,6 +188,7 @@ export class PerformanceCollector implements IPerformanceCollector {
       const mem = this.#readMemory();
 
       this.memory.value = mem;
+
       if (mem !== null) {
         this.memoryHistory.value = (prev: number[]) =>
           appendHistory(prev, [mem.percent], this.config.maxHistory);

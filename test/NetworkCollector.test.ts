@@ -80,6 +80,7 @@ test('NetworkCollector records filtered fetch requests inside maxHistory', async
 test('NetworkCollector expires window5s without new network traffic', async () => {
   let now = Date.parse('2026-08-07T12:00:00.000Z');
   let expireWindow: (() => void) | null = null;
+
   const dateNow = jest.spyOn(Date, 'now').mockImplementation(() => now);
   const originalSetTimeout = globalThis.setTimeout;
   const schedule = jest.fn((handler: TimerHandler) => {
@@ -715,6 +716,7 @@ test('failed synchronous XHR sends remove instrumentation before reuse', () => {
 
 test('requests from an earlier lifecycle do not enter a restarted monitor', async () => {
   let finish!: (response: Response) => void;
+
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {

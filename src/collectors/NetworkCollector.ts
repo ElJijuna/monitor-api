@@ -11,6 +11,7 @@ import type {
 const NETWORK_WINDOW_MS = 5000;
 
 let _idCounter = 0;
+
 const uid = () => `net-${Date.now()}-${++_idCounter}`;
 
 interface XHRWithMonitor extends XMLHttpRequest {
@@ -114,13 +115,11 @@ function patchFetch(): void {
         : input instanceof URL
           ? input.href
           : (input as Request).url;
-
     const method = (
       init?.method ??
       (input instanceof Request ? input.method : undefined) ??
       'GET'
     ).toUpperCase();
-
     const requestSize = estimateBodySize(init?.body);
     const start = performance.now();
     const listeners = [...networkListeners];
@@ -162,6 +161,7 @@ function patchFetch(): void {
         },
         listeners,
       );
+
       throw err;
     }
   };
@@ -212,7 +212,6 @@ function patchXhr(): void {
     const requestSize = estimateBodySize(body as BodyInit | null | undefined);
     const url = this.__mon_url ?? '';
     const method = this.__mon_method ?? 'GET';
-
     const onLoadEnd = () => {
       cleanup();
       emitNetworkEntry(
@@ -243,6 +242,7 @@ function patchXhr(): void {
       return callOriginalSend.call(this, body);
     } catch (error) {
       cleanup();
+
       throw error;
     }
   } as typeof XMLHttpRequest.prototype.send;
@@ -453,6 +453,7 @@ export class NetworkCollector implements INetworkCollector {
     let latency = 0;
     let payload = 0;
     let errors = 0;
+
     for (const bucket of this.#windowBuckets.values()) {
       count += bucket.count;
       latency += bucket.latency;

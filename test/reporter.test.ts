@@ -26,19 +26,18 @@ afterEach(() => {
   globalThis.setTimeout = realTimers.setTimeout;
 });
 
-test.each([
-  NaN,
-  Infinity,
-  -1,
-  0.5,
-])('rejects invalid history %s at every configuration boundary', (maxHistory) => {
-  expect(() => createMonitor({ maxHistory, sampleRate: 0 })).toThrow(RangeError);
-  for (const collector of ['events', 'errors', 'network', 'performance', 'react', 'webVitals']) {
-    expect(() =>
-      createMonitor({ collectors: { [collector]: { maxHistory } }, sampleRate: 0 }),
-    ).toThrow(RangeError);
-  }
-});
+test.each([NaN, Infinity, -1, 0.5])(
+  'rejects invalid history %s at every configuration boundary',
+  (maxHistory) => {
+    expect(() => createMonitor({ maxHistory, sampleRate: 0 })).toThrow(RangeError);
+
+    for (const collector of ['events', 'errors', 'network', 'performance', 'react', 'webVitals']) {
+      expect(() =>
+        createMonitor({ collectors: { [collector]: { maxHistory } }, sampleRate: 0 }),
+      ).toThrow(RangeError);
+    }
+  },
+);
 
 test.each([0, -1, NaN, Infinity, 2 ** 31])('rejects unsafe report intervals %s', (interval) => {
   expect(() => reporting({ interval })).toThrow(RangeError);
@@ -62,6 +61,7 @@ test('flush is inert before start and after stop or destroy', async () => {
 
 test('flush coalesces concurrent calls and allows the next awaited delivery', async () => {
   let finish!: () => void;
+
   const transport = jest.fn(
     () =>
       new Promise<void>((resolve) => {
@@ -95,29 +95,29 @@ test('flush coalesces concurrent calls and allows the next awaited delivery', as
   }
 });
 
-test.each([
-  'stop',
-  'destroy',
-] as const)('%s cancels retry timers and resolves the pending flush', async (action) => {
-  jest.useFakeTimers();
-  const transport = jest.fn(async () => {
-    throw new Error('secret');
-  });
-  const monitor = reporting({ transport, retry: { maxAttempts: 3, delay: 100 } });
+test.each(['stop', 'destroy'] as const)(
+  '%s cancels retry timers and resolves the pending flush',
+  async (action) => {
+    jest.useFakeTimers();
+    const transport = jest.fn(async () => {
+      throw new Error('secret');
+    });
+    const monitor = reporting({ transport, retry: { maxAttempts: 3, delay: 100 } });
 
-  monitor.start();
-  const delivery = monitor.reporter.flush();
+    monitor.start();
+    const delivery = monitor.reporter.flush();
 
-  await jest.advanceTimersByTimeAsync(0);
-  expect(monitor.reporter.snapshot.value.status).toBe('retrying');
-  monitor[action]();
-  expect(await delivery).toBe(false);
-  await jest.advanceTimersByTimeAsync(1000);
-  expect(transport).toHaveBeenCalledTimes(1);
-  expect(jest.getTimerCount()).toBe(0);
-  expect(monitor.reporter.snapshot.value.cancelled).toBe(1);
-  monitor.destroy();
-});
+    await jest.advanceTimersByTimeAsync(0);
+    expect(monitor.reporter.snapshot.value.status).toBe('retrying');
+    monitor[action]();
+    expect(await delivery).toBe(false);
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(monitor.reporter.snapshot.value.cancelled).toBe(1);
+    monitor.destroy();
+  },
+);
 
 test('stop aborts a transport without timeout and restart isolates late completion', async () => {
   const requests: ProductionReportRequest[] = [];

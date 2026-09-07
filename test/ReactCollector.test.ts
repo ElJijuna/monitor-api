@@ -72,7 +72,9 @@ test('React byComponent is derived from retained history', () => {
   });
 
   function First() {}
+
   function Second() {}
+
   function Third() {}
 
   const monitor = createMonitor({
@@ -116,14 +118,15 @@ test('ReactCollector aggregates component names that match inherited object keys
     monitor.start();
     commit(components.constructor, 1);
     commit(components.toString, 2);
-    commit(components.__proto__, 3);
+    commit(Object.getOwnPropertyDescriptor(components, '__proto__')?.value, 3);
 
-    const byComponent = monitor.react.snapshot.value.byComponent;
+    const { byComponent } = monitor.react.snapshot.value;
+    const protoStats = Object.getOwnPropertyDescriptor(byComponent, '__proto__')?.value;
 
     expect(Object.keys(byComponent)).toEqual(['constructor', 'toString', '__proto__']);
     expect(byComponent.constructor).toMatchObject({ renders: 1, totalDuration: 1 });
     expect(byComponent.toString).toMatchObject({ renders: 1, totalDuration: 2 });
-    expect(byComponent.__proto__).toMatchObject({ renders: 1, totalDuration: 3 });
+    expect(protoStats).toMatchObject({ renders: 1, totalDuration: 3 });
   } finally {
     monitor.destroy();
   }
@@ -225,7 +228,9 @@ test('ReactCollector reports commits truncated by the fiber visit limit', () => 
   });
 
   function First() {}
+
   function Second() {}
+
   function Third() {}
 
   const root = fiberFor(First);
@@ -289,6 +294,7 @@ test('ReactCollector records unmounts from the DevTools hook in the following co
   });
 
   function Removed() {}
+
   function Updated() {}
 
   const updated = fiberFor(Updated, 2);
@@ -309,7 +315,7 @@ test('ReactCollector records unmounts from the DevTools hook in the following co
     hook.onCommitFiberUnmount(1, fiberFor(Removed));
     hook.onCommitFiberRoot(1, { current: updated });
 
-    const entries = monitor.react.snapshot.value.entries;
+    const { entries } = monitor.react.snapshot.value;
 
     expect(entries.map((entry) => [entry.component, entry.type])).toEqual([
       ['Removed', 'unmount'],
@@ -331,7 +337,9 @@ test('ReactCollector keeps pending unmounts isolated by renderer', () => {
   });
 
   function Removed() {}
+
   function RendererOne() {}
+
   function RendererTwo() {}
 
   const rendererOne = fiberFor(RendererOne);

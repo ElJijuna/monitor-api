@@ -15,6 +15,7 @@ const MAX_MESSAGE_LENGTH = 1024;
 const MAX_STACK_LENGTH = 8192;
 
 let _idCounter = 0;
+
 const uid = () => `err-${Date.now()}-${++_idCounter}`;
 
 function limitText(value: unknown, fallback: string, maxLength: number): string {

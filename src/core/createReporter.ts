@@ -21,6 +21,7 @@ export function validateReportConfig(report: ProductionReportConfig | undefined)
   }
 
   validateDelay(report.interval, 'report.interval', 1);
+
   if (report.timeout !== undefined) {
     validateDelay(report.timeout, 'report.timeout');
   }
@@ -64,10 +65,29 @@ function cancellable<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    Promise.resolve(operation)
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener('abort', onAbort));
+    void (async () => {
+      try {
+        resolve(await operation);
+      } catch (error) {
+        reject(error);
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+      }
+    })();
   });
+}
+
+async function postReport(request: Omit<ProductionReportRequest, 'signal'>, signal: AbortSignal) {
+  const response = await fetch(request.endpoint, {
+    method: 'POST',
+    headers: request.headers,
+    body: request.body,
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new DeliveryError('transport');
+  }
 }
 
 async function waitForRetry(delay: number, signal: AbortSignal): Promise<void> {
@@ -111,16 +131,7 @@ async function attemptDelivery(
 
     const delivery = report.transport
       ? report.transport({ ...request, signal: controller.signal })
-      : fetch(request.endpoint, {
-          method: 'POST',
-          headers: request.headers,
-          body: request.body,
-          signal: controller.signal,
-        }).then((response) => {
-          if (!response.ok) {
-            throw new DeliveryError('transport');
-          }
-        });
+      : postReport(request, controller.signal);
 
     await cancellable(Promise.resolve(delivery), controller.signal);
   } catch (error) {
@@ -159,6 +170,7 @@ export function createReporter(
   let started = false;
   let destroyed = false;
   let active: { controller: AbortController; promise: Promise<boolean> } | null = null;
+
   const update = (patch: Partial<ReporterSnapshot>) => {
     state.value = { ...state.value, ...patch };
   };
@@ -175,6 +187,7 @@ export function createReporter(
         }
 
         update({ status: 'sending', attempts: state.value.attempts + 1 });
+
         // Subscribers may stop the monitor while observing a status change.
         if (signal.aborted) {
           return false;
@@ -182,6 +195,7 @@ export function createReporter(
 
         try {
           await attemptDelivery(config, request, signal);
+
           if (signal.aborted) {
             return false;
           }
@@ -240,6 +254,7 @@ export function createReporter(
     const controller = new AbortController();
 
     let settle!: (sent: boolean) => void;
+
     const run = {
       controller,
       promise: new Promise<boolean>((resolve) => {
@@ -263,6 +278,7 @@ export function createReporter(
 
       body = serialized;
       stage = 'payload-too-large';
+
       if (new TextEncoder().encode(body).byteLength > (report.maxPayloadBytes ?? 65_536)) {
         throw new DeliveryError(stage);
       }
@@ -286,31 +302,32 @@ export function createReporter(
       return run.promise;
     }
 
-    void deliver(
-      report,
-      {
-        endpoint: report.endpoint,
-        payload,
-        body,
-        headers: { 'Content-Type': 'application/json', ...report.headers },
-      },
-      controller.signal,
-    ).then(
-      (sent) => {
+    void (async () => {
+      try {
+        const sent = await deliver(
+          report,
+          {
+            endpoint: report.endpoint,
+            payload,
+            body,
+            headers: { 'Content-Type': 'application/json', ...report.headers },
+          },
+          controller.signal,
+        );
+
         if (active === run) {
           active = null;
         }
 
         settle(sent);
-      },
-      () => {
+      } catch {
         if (active === run) {
           active = null;
         }
 
         settle(false);
-      },
-    );
+      }
+    })();
 
     return run.promise;
   }
@@ -327,6 +344,7 @@ export function createReporter(
 
     active = null;
     pending?.controller.abort();
+
     if (enabled && report) {
       update({ status: 'stopped', cancelled: state.value.cancelled + Number(pending !== null) });
     }

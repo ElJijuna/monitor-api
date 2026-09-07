@@ -515,6 +515,7 @@ test('production reporting does not overlap pending requests', async () => {
   const originalFetch = globalThis.fetch;
 
   let resolveFetch!: (response: Response) => void;
+
   const pendingResponse = new Promise<Response>((resolve) => {
     resolveFetch = resolve;
   });

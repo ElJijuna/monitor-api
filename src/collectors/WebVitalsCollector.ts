@@ -50,6 +50,7 @@ export class WebVitalsCollector implements IWebVitalsCollector {
     }
 
     this.#started = true;
+
     if (this.#registered) {
       return;
     }
