@@ -1,3 +1,12 @@
+# [1.4.0](https://github.com/ElJijuna/monitor-api/compare/v1.3.0...v1.4.0) (2026-09-07)
+
+
+### Features
+
+* add error collector for capturing and managing JavaScript errors ([187f4e5](https://github.com/ElJijuna/monitor-api/commit/187f4e57ed68ccd4fd697f70d8130cdb93935daa))
+* add Playwright testing setup and demo tests ([22b6157](https://github.com/ElJijuna/monitor-api/commit/22b6157c1769f52ffbdcda8a6fe84385156aeb10))
+* enhance Playwright testing setup; add browser compatibility and privacy guides ([23a0c74](https://github.com/ElJijuna/monitor-api/commit/23a0c7497910716665231dfec9d2b4ecceaf8e74))
+
 # [1.3.0](https://github.com/ElJijuna/monitor-api/compare/v1.2.0...v1.3.0) (2026-08-08)
 
 
