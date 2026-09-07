@@ -29,7 +29,6 @@ function metric(name: MetricType['name'], value: number): MetricType {
 }
 
 afterEach(() => {
-  callbacks.clear();
   jest.clearAllMocks();
   Reflect.deleteProperty(globalThis, 'window');
 });
@@ -46,6 +45,12 @@ test('WebVitalsCollector records latest metrics and retained entries', () => {
   });
 
   monitor.start();
+
+  expect(webVitals.onCLS).toHaveBeenCalledTimes(1);
+  expect(webVitals.onFCP).toHaveBeenCalledTimes(1);
+  expect(webVitals.onINP).toHaveBeenCalledTimes(1);
+  expect(webVitals.onLCP).toHaveBeenCalledTimes(1);
+  expect(webVitals.onTTFB).toHaveBeenCalledTimes(1);
 
   callbacks.get('CLS')?.(metric('CLS', 0.01));
   callbacks.get('LCP')?.(metric('LCP', 1800));
@@ -96,11 +101,11 @@ test('WebVitalsCollector start is idempotent and stop ignores future reports', (
   monitor.start();
   monitor.start();
 
-  expect(webVitals.onCLS).toHaveBeenCalledTimes(1);
-  expect(webVitals.onFCP).toHaveBeenCalledTimes(1);
-  expect(webVitals.onINP).toHaveBeenCalledTimes(1);
-  expect(webVitals.onLCP).toHaveBeenCalledTimes(1);
-  expect(webVitals.onTTFB).toHaveBeenCalledTimes(1);
+  expect(webVitals.onCLS).not.toHaveBeenCalled();
+  expect(webVitals.onFCP).not.toHaveBeenCalled();
+  expect(webVitals.onINP).not.toHaveBeenCalled();
+  expect(webVitals.onLCP).not.toHaveBeenCalled();
+  expect(webVitals.onTTFB).not.toHaveBeenCalled();
 
   monitor.stop();
   callbacks.get('CLS')?.(metric('CLS', 0.02));
@@ -108,4 +113,35 @@ test('WebVitalsCollector start is idempotent and stop ignores future reports', (
   expect(monitor.webVitals.snapshot.value.cls).toBeNull();
 
   monitor.destroy();
+});
+
+test('WebVitalsCollector shares observers across monitor instances', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  const first = createMonitor({ collectors: { webVitals: true } });
+  const second = createMonitor({ collectors: { webVitals: true } });
+
+  first.start();
+  second.start();
+
+  callbacks.get('LCP')?.(metric('LCP', 1500));
+
+  expect(first.webVitals.snapshot.value.lcp?.value).toBe(1500);
+  expect(second.webVitals.snapshot.value.lcp?.value).toBe(1500);
+  expect(webVitals.onCLS).not.toHaveBeenCalled();
+  expect(webVitals.onFCP).not.toHaveBeenCalled();
+  expect(webVitals.onINP).not.toHaveBeenCalled();
+  expect(webVitals.onLCP).not.toHaveBeenCalled();
+  expect(webVitals.onTTFB).not.toHaveBeenCalled();
+
+  first.destroy();
+  callbacks.get('LCP')?.(metric('LCP', 1900));
+
+  expect(first.webVitals.snapshot.value.lcp?.value).toBe(1500);
+  expect(second.webVitals.snapshot.value.lcp?.value).toBe(1900);
+
+  second.destroy();
 });

@@ -7,20 +7,22 @@ provide absolute performance guarantees. They run against the built package in
 ## Environment
 
 - Command: `npm run bench`
-- Runtime: Node.js in the local development container
+- Runtime: Node.js 26.3.1 on macOS 26.6.2 (Apple silicon)
 - Build target: published `dist/` output
 - Warmup per case: 100 ms
-- Sample per case: 500 ms
+- Samples per case: 5 × 300 ms; table reports the median
 - Batch size: 100 operations
 
 ## Results
 
 | Benchmark | Throughput | Average time |
 | --- | ---: | ---: |
-| `createMonitor + destroy` | 11,425 ops/s | 87.52 us |
-| `emitMonitorEvent` | 79,577 ops/s | 12.57 us |
-| `Web Vitals start + destroy` | 11,376 ops/s | 87.91 us |
-| `React commit with 50 fibers` | 5,863 ops/s | 171 us |
+| `createMonitor + destroy` | 45,318 ops/s | 22.07 us |
+| `emitMonitorEvent` | 190,914 ops/s | 5.24 us |
+| `Web Vitals subscribe + destroy` | 87,436 ops/s | 11.44 us |
+| `React commit with 50 fibers` | 17,103 ops/s | 58.47 us |
+| `React commit with 1,000 deep fibers` | 1,704 ops/s | 587 us |
+| `React commit with 1,000 wide fibers` | 1,291 ops/s | 775 us |
 
 ## Interpretation
 
@@ -34,17 +36,16 @@ benchmark includes browser-like `CustomEvent` dispatch through an `EventTarget`,
 so it measures the public event path rather than only the private collector
 method.
 
-`Web Vitals start + destroy` measures monitor integration overhead: creating a
-monitor with only the Web Vitals collector active, registering the `web-vitals`
-observers against minimal browser stubs, and destroying the monitor. It does not
-measure the browser's internal Web Vitals calculation cost, which is handled by
-the platform and the `web-vitals` package.
+`Web Vitals subscribe + destroy` measures monitor integration overhead after the
+shared observers have been installed: creating a monitor, attaching it to the
+shared channel, detaching it, and destroying its signals. It does not measure the
+browser's internal metric calculation, which belongs to the platform and the
+`web-vitals` package.
 
-`React commit with 50 fibers` is the most expensive benchmark, which is expected.
-The collector walks the Fiber tree, creates render entries, trims retained
-history, and derives per-component statistics from the retained entries. At
-roughly 171 us per 50-component commit in this synthetic run, the overhead is
-reasonable for a runtime monitor.
+The React cases cover a normal 50-fiber commit plus deep and wide 1,000-fiber
+trees. The collector walks each tree, creates render entries, trims retained
+history, and derives per-component statistics. The wide case is slower because
+it retains and aggregates many sibling component names.
 
 ## Potential Improvements
 
@@ -69,7 +70,7 @@ available and avoids DOM event dispatch. `emitMonitorEvent(...)` should remain
 the ergonomic cross-tree API, while direct collector emission can be used in hot
 instrumentation paths.
 
-For Web Vitals, no optimization is currently needed. The collector registers the
-standard metric observers once and ignores future callbacks after `stop()`.
-Metric reports are low-frequency compared with network requests or React
-commits, so the current snapshot update path is not expected to be a hot path.
+For Web Vitals, monitor instances now share the standard metric observers by
+`reportAllChanges` mode. Starting and destroying additional instances only adds
+or removes a subscriber, avoiding repeated platform observers in apps with more
+than one monitor.

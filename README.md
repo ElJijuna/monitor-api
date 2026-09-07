@@ -22,6 +22,7 @@ Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, 
 - **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
 - **TypeScript-first** — fully typed, zero `any` in the public API
 - **Small runtime** — depends on [ssignal](https://www.npmjs.com/package/ssignal) and [web-vitals](https://www.npmjs.com/package/web-vitals)
+- **Documented boundaries** — see the [privacy guide](PRIVACY.md) and [browser compatibility matrix](COMPATIBILITY.md)
 
 ## Installation
 
@@ -88,6 +89,7 @@ apps.
 - Collection starts only after `monitor.start()`.
 - `monitor.stop()` and `monitor.destroy()` restore patched browser APIs.
 - Multiple monitor instances share network and React global hooks; the last active instance restores them.
+- Multiple monitor instances with the same `reportAllChanges` setting share Web Vitals observers.
 - Histories are bounded by `maxHistory`.
 - Custom event payloads are copied before retention and bounded by depth and UTF-8 byte size.
 - Error collection is opt-in. Default reporting sends only error counts, not messages or stacks.
@@ -595,6 +597,9 @@ monitor is started.
 snapshot, including potentially sensitive application data. Redact secrets and
 bound the returned payload before enabling it in production.
 
+See [PRIVACY.md](PRIVACY.md) for the field-by-field data inventory, retention
+behavior, reporting boundary, and deployment checklist.
+
 ---
 
 ## Collector config
@@ -664,7 +669,8 @@ npm run bench
 ```
 
 - `demo` builds the package and serves the live browser demo at `http://127.0.0.1:4177`.
-- `test:browser` builds the package and runs the Playwright demo smoke test in Chromium.
+- `test:browser` builds the package and runs the Playwright demo smoke test in Chromium, Firefox, and WebKit.
+- The supported feature matrix and fallbacks are documented in [COMPATIBILITY.md](COMPATIBILITY.md).
 - `docs:build` generates TypeDoc HTML in `docs/`.
 - `bench` builds the package and runs runtime benchmarks from `bench/`.
 - Benchmark notes are tracked in `BENCH.md`.

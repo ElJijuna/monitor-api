@@ -34,7 +34,7 @@ jobs:
         run: npm test -- --runInBand
 
       - name: Install Playwright browsers
-        run: npx playwright install chromium
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - name: Browser test
         run: npm run test:browser

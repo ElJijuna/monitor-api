@@ -19,6 +19,43 @@ const emptySnapshot = (): WebVitalsSnapshot => ({
   entries: [],
 });
 
+type MetricSubscriber = (metric: MetricType) => void;
+
+interface SharedChannel {
+  registered: boolean;
+  subscribers: Set<MetricSubscriber>;
+}
+
+const sharedChannels: Record<'allChanges' | 'finalChanges', SharedChannel> = {
+  allChanges: { registered: false, subscribers: new Set() },
+  finalChanges: { registered: false, subscribers: new Set() },
+};
+
+function subscribeToWebVitals(subscriber: MetricSubscriber, reportAllChanges: boolean): () => void {
+  const channel = sharedChannels[reportAllChanges ? 'allChanges' : 'finalChanges'];
+
+  channel.subscribers.add(subscriber);
+
+  if (!channel.registered) {
+    channel.registered = true;
+
+    const publish = (metric: MetricType) => {
+      for (const currentSubscriber of channel.subscribers) {
+        currentSubscriber(metric);
+      }
+    };
+    const opts = { reportAllChanges };
+
+    onCLS(publish, opts);
+    onFCP(publish, opts);
+    onINP(publish, opts);
+    onLCP(publish, opts);
+    onTTFB(publish, opts);
+  }
+
+  return () => channel.subscribers.delete(subscriber);
+}
+
 export class WebVitalsCollector implements IWebVitalsCollector {
   #destroyed = false;
   readonly snapshot: ComputedSignal<WebVitalsSnapshot>;
@@ -26,7 +63,7 @@ export class WebVitalsCollector implements IWebVitalsCollector {
 
   #snapshot: SSignal<WebVitalsSnapshot>;
   #started = false;
-  #registered = false;
+  #unsubscribe: (() => void) | null = null;
 
   constructor(private readonly config: WebVitalsCollectorConfig) {
     validateMaxHistory(config.maxHistory);
@@ -50,23 +87,16 @@ export class WebVitalsCollector implements IWebVitalsCollector {
     }
 
     this.#started = true;
-
-    if (this.#registered) {
-      return;
-    }
-
-    this.#registered = true;
-    const opts = { reportAllChanges: this.config.reportAllChanges };
-
-    onCLS((metric) => this.#record(metric), opts);
-    onFCP((metric) => this.#record(metric), opts);
-    onINP((metric) => this.#record(metric), opts);
-    onLCP((metric) => this.#record(metric), opts);
-    onTTFB((metric) => this.#record(metric), opts);
+    this.#unsubscribe = subscribeToWebVitals(
+      (metric) => this.#record(metric),
+      this.config.reportAllChanges,
+    );
   }
 
   stop(): void {
     this.#started = false;
+    this.#unsubscribe?.();
+    this.#unsubscribe = null;
   }
 
   destroy(): void {

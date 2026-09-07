@@ -2,8 +2,9 @@ import { performance } from 'node:perf_hooks';
 import { createMonitor, emitMonitorEvent } from '../dist/index.js';
 
 const WARMUP_MS = 100;
-const SAMPLE_MS = 500;
+const SAMPLE_MS = 300;
 const BATCH_SIZE = 100;
+const SAMPLE_COUNT = 5;
 
 if (typeof globalThis.CustomEvent === 'undefined') {
   globalThis.CustomEvent = class CustomEvent extends Event {
@@ -51,11 +52,17 @@ function runLoop(fn, durationMs) {
 
 function bench(name, fn) {
   runLoop(fn, WARMUP_MS);
-  const { elapsed, iterations } = runLoop(fn, SAMPLE_MS);
-  const hz = iterations / (elapsed / 1000);
-  const avgMs = elapsed / iterations;
+  const samples = Array.from({ length: SAMPLE_COUNT }, () => {
+    const { elapsed, iterations } = runLoop(fn, SAMPLE_MS);
+    return {
+      hz: iterations / (elapsed / 1000),
+      avgMs: elapsed / iterations,
+      iterations,
+    };
+  }).sort((a, b) => a.hz - b.hz);
+  const median = samples[Math.floor(samples.length / 2)];
 
-  return { name, hz, avgMs, iterations };
+  return { name, ...median };
 }
 
 function print(results) {
@@ -202,7 +209,7 @@ function runBenchmarks() {
 
   withWebVitalsBrowser();
   results.push(
-    bench('Web Vitals start + destroy', () => {
+    bench('Web Vitals subscribe + destroy', () => {
       const monitor = createMonitor({
         collectors: { webVitals: true },
       });
