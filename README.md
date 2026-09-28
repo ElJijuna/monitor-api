@@ -30,6 +30,26 @@ Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, 
 npm install monitor-api
 ```
 
+<details>
+<summary>Installing from GitHub Packages instead</summary>
+
+Every release is also published to GitHub Packages as `@eljijuna/monitor-api`. GitHub
+requires authentication even for public packages: add this `.npmrc` next to your
+`package.json`, with a token that has the `read:packages` scope in `GITHUB_TOKEN`:
+
+```ini
+@eljijuna:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+```sh
+npm install @eljijuna/monitor-api
+```
+
+Import from `@eljijuna/monitor-api` (and `@eljijuna/monitor-api/react`) instead.
+
+</details>
+
 ## Quick start
 
 ```ts

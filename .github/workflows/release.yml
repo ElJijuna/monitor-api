@@ -15,6 +15,9 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      published: ${{ steps.release-check.outputs.published }}
+      version: ${{ steps.release-check.outputs.version }}
 
     steps:
       - name: Checkout
@@ -47,3 +50,65 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run release
+
+      # semantic-release tags the release commit (HEAD); no tag means nothing was published.
+      - name: Detect published release
+        id: release-check
+        run: |
+          git fetch --tags --force
+          tag="$(git tag --points-at HEAD --list 'v*' | head -n 1)"
+          if [ -n "$tag" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "Released $tag"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "No new release"
+          fi
+
+  # Mirror of the npm release. A separate job so a failure here never affects npm, which has
+  # already published by the time this runs. continue-on-error keeps the Release run green so
+  # the Docs workflow (triggered on a successful Release) still deploys.
+  github-packages:
+    name: Publish to GitHub Packages
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # The release tag carries the package.json bumped to the released version.
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@eljijuna'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Only in this job: GitHub Packages requires the owner's scope and has no provenance.
+      - name: Scope the package for GitHub Packages
+        run: |
+          npm pkg set name=@eljijuna/monitor-api
+          npm pkg delete publishConfig.provenance
+
+      # Tests already ran in the release job; skip prepublishOnly.
+      - name: Publish
+        run: npm publish --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
