@@ -123,6 +123,7 @@ test('stop aborts a transport without timeout and restart isolates late completi
   const requests: ProductionReportRequest[] = [];
   const completions: Array<() => void> = [];
   const monitor = reporting({
+    timeout: false,
     transport: (request) => {
       requests.push(request);
 
@@ -193,6 +194,69 @@ test('timeout records a safe failure and releases all attempt resources', async 
   });
   monitor.destroy();
   expect(jest.getTimerCount()).toBe(0);
+});
+
+test('timeout defaults to the report interval so a hung delivery cannot block reporting', async () => {
+  jest.useFakeTimers();
+  const transport = jest
+    .fn<() => Promise<void>>()
+    .mockReturnValueOnce(new Promise<void>(() => {}))
+    .mockResolvedValue(undefined);
+  const monitor = reporting({ interval: 1000, transport });
+
+  try {
+    monitor.start();
+    const hung = monitor.reporter.flush();
+
+    await jest.advanceTimersByTimeAsync(999);
+    expect(monitor.reporter.snapshot.value.status).toBe('sending');
+    await jest.advanceTimersByTimeAsync(1);
+    expect(await hung).toBe(false);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ failed: 1, lastFailure: 'timeout' });
+
+    // The tick at 1000 ms coincides with the timeout and is skipped; the next one delivers.
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ sent: 1, skipped: 1 });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('default timeout is capped at 30 seconds for long intervals', async () => {
+  jest.useFakeTimers();
+  const monitor = reporting({ interval: 60_000, transport: () => new Promise<void>(() => {}) });
+
+  try {
+    monitor.start();
+    const sent = monitor.reporter.flush();
+
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(await sent).toBe(false);
+    expect(monitor.reporter.snapshot.value.lastFailure).toBe('timeout');
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('timeout: false disables the delivery timeout', async () => {
+  jest.useFakeTimers();
+  const monitor = reporting({
+    interval: 1000,
+    timeout: false,
+    transport: () => new Promise<void>(() => {}),
+  });
+
+  try {
+    monitor.start();
+    const sent = monitor.reporter.flush();
+
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ status: 'sending', failed: 0 });
+    monitor.stop();
+    expect(await sent).toBe(false);
+  } finally {
+    monitor.destroy();
+  }
 });
 
 test('UTF-8 payload limit applies to custom transforms before transport', async () => {

@@ -8,6 +8,7 @@ import type {
 } from './types';
 
 const MAX_TIMER_DELAY = 2_147_483_647;
+const MAX_DEFAULT_TIMEOUT = 30_000;
 
 function validateDelay(value: number, name: string, minimum = 0): void {
   if (!Number.isFinite(value) || value < minimum || value > MAX_TIMER_DELAY) {
@@ -22,7 +23,7 @@ export function validateReportConfig(report: ProductionReportConfig | undefined)
 
   validateDelay(report.interval, 'report.interval', 1);
 
-  if (report.timeout !== undefined) {
+  if (report.timeout !== undefined && report.timeout !== false) {
     validateDelay(report.timeout, 'report.timeout');
   }
 
@@ -43,6 +44,15 @@ export function validateReportConfig(report: ProductionReportConfig | undefined)
   if (typeof report.retry?.delay === 'number') {
     validateDelay(report.retry.delay, 'report.retry.delay');
   }
+}
+
+/** A delivery slower than the interval would block every later one, so it bounds the default. */
+function resolveTimeout(report: ProductionReportConfig): number | null {
+  if (report.timeout === false) {
+    return null;
+  }
+
+  return report.timeout ?? Math.min(report.interval, MAX_DEFAULT_TIMEOUT);
 }
 
 class DeliveryError extends Error {
@@ -122,11 +132,13 @@ async function attemptDelivery(
       throw new Error('Report cancelled');
     }
 
-    if (report.timeout !== undefined) {
+    const timeout = resolveTimeout(report);
+
+    if (timeout !== null) {
       timer = setTimeout(() => {
         timedOut = true;
         controller.abort();
-      }, report.timeout);
+      }, timeout);
     }
 
     const delivery = report.transport

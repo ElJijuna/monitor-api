@@ -67,8 +67,11 @@ export interface ProductionReportConfig {
   headers?: Record<string, string>;
   /** Custom report transport. Defaults to an HTTP POST through `fetch`. */
   transport?: ProductionReportTransport;
-  /** Maximum delivery time in milliseconds. Omit to disable timeouts. */
-  timeout?: number;
+  /**
+   * Maximum time per delivery attempt in milliseconds. Defaults to `interval`, capped at
+   * 30,000 ms, so a hung request cannot block later reports. Use `false` to disable it.
+   */
+  timeout?: number | false;
   /** Maximum UTF-8 JSON body size. Defaults to 65,536 bytes, including custom payloads. */
   maxPayloadBytes?: number;
   /** Optional policy for retrying failed or timed-out deliveries. */

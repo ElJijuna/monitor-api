@@ -576,7 +576,7 @@ const monitor = createMonitor({
     endpoint: 'https://my-api.com/metrics',
     interval: 30_000,  // send every 30s
     headers: { Authorization: `Bearer ${token}` },
-    timeout: 5_000,
+    timeout: 5_000,    // per attempt; default: interval, capped at 30s; false disables
     retry: {
       maxAttempts: 3,
       delay: (failedAttempt) => failedAttempt * 1_000,
@@ -602,7 +602,8 @@ Production reporting is intentionally best-effort: failed report requests are
 ignored after the optional retry policy is exhausted, so monitoring never breaks
 the application. Errors from `transform`, serialization, timeout, and transport
 setup are contained as well. The reporter keeps at most one delivery in flight
-and skips interval ticks while it is pending. Authentication can be supplied
+and skips interval ticks while it is pending, so each attempt times out after
+`interval` (at most 30 seconds) unless `timeout` says otherwise. Authentication can be supplied
 through `headers`. A custom `transport({ endpoint, payload, body, headers,
 signal })` can replace `fetch`; without either transport, the reporter does not
 start.
