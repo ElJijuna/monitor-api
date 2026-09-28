@@ -409,12 +409,20 @@ interface WebVitalMetric {
 ### ErrorCollector
 
 Error collection is disabled by default because error messages and stacks can
-include user data. Enable it explicitly with `collectors: ['errors']` or
-`collectors: { errors: true }`.
+include user data. Enable it explicitly by adding `errors` to `collectors`.
+
+> **Note:** once `collectors` is set, only the collectors it lists are enabled.
+> `collectors: ['errors']` or `collectors: { errors: true }` alone disables every
+> other collector. List the defaults you still want alongside `errors`.
 
 ```ts
 const monitor = createMonitor({
   collectors: {
+    performance: true,
+    network: true,
+    react: true,
+    events: true,
+    webVitals: true,
     errors: {
       maxHistory: 20,
       sanitize: (details) => ({
@@ -629,7 +637,8 @@ createMonitor({
   // Enable only specific collectors
   collectors: ['performance', 'network', 'errors'],
 
-  // Or configure each individually
+  // Or configure each individually. Collectors missing from the object are
+  // disabled, so list every collector you want to keep.
   collectors: {
     performance: true,
     network: { filter: (url) => !url.includes('/analytics') },
