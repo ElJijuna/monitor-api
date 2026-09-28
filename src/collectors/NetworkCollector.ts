@@ -308,6 +308,8 @@ export class NetworkCollector implements INetworkCollector {
   #entries: SSignal<NetworkEntry[]>;
   #windowClock: SSignal<number>;
   #filter: (url: string) => boolean;
+  // Internal exclusion (the monitor's own report endpoint) that setFilter must not replace.
+  #isExcluded: (url: string) => boolean;
   #teardown: (() => void) | null = null;
   #windowExpiry: ReturnType<typeof setTimeout> | null = null;
   // At most 5,001 millisecond buckets, independent of request volume and history size.
@@ -316,9 +318,13 @@ export class NetworkCollector implements INetworkCollector {
     { count: number; latency: number; payload: number; errors: number }
   >();
 
-  constructor(private readonly config: NetworkCollectorConfig) {
+  constructor(
+    private readonly config: NetworkCollectorConfig,
+    isExcluded: (url: string) => boolean = () => false,
+  ) {
     validateMaxHistory(config.maxHistory);
     this.#filter = config.filter ?? (() => true);
+    this.#isExcluded = isExcluded;
     this.#entries = new SSignal<NetworkEntry[]>([]);
     this.#windowClock = new SSignal(Date.now());
     this.onRequest = new SSignal<NetworkEntry | null>(null);
@@ -377,7 +383,7 @@ export class NetworkCollector implements INetworkCollector {
   }
 
   #record(entry: NetworkEntry): void {
-    if (!this.#filter(entry.url)) {
+    if (this.#isExcluded(entry.url) || !this.#filter(entry.url)) {
       return;
     }
 

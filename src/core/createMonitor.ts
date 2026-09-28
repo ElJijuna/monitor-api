@@ -72,22 +72,6 @@ function createDefaultReportPayload(snap: MonitorSnapshot) {
   };
 }
 
-function excludeReportEndpoint(
-  config: NetworkCollectorConfig | false,
-  report: MonitorConfig['report'],
-): NetworkCollectorConfig | false {
-  if (config === false || !report) {
-    return config;
-  }
-
-  const userFilter = config.filter;
-
-  return {
-    ...config,
-    filter: (url) => url !== report.endpoint && (userFilter?.(url) ?? true),
-  };
-}
-
 function resolveCollector<T>(name: CollectorName, config: MonitorConfig, defaults: T): T | false {
   const { collectors } = config;
 
@@ -173,10 +157,8 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const errorsConfig: ErrorCollectorConfig = { maxHistory };
   const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true };
   const perfCfg = resolveCollector('performance', config, perfConfig);
-  const netCfg = excludeReportEndpoint(
-    resolveCollector('network', config, netConfig),
-    env === 'production' ? config.report : undefined,
-  );
+  const netCfg = resolveCollector('network', config, netConfig);
+  const reportEndpoint = env === 'production' ? config.report?.endpoint : undefined;
   const reactCfg = resolveCollector('react', config, reactConfig);
   const eventsCfg = resolveCollector('events', config, eventsConfig);
   const errorsCfg = config.collectors ? resolveCollector('errors', config, errorsConfig) : false;
@@ -194,7 +176,9 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       ? new PerformanceCollector(perfCfg)
       : createDisabledPerformanceCollector();
   const network =
-    active.network && netCfg ? new NetworkCollector(netCfg) : createDisabledNetworkCollector();
+    active.network && netCfg
+      ? new NetworkCollector(netCfg, (url) => url === reportEndpoint)
+      : createDisabledNetworkCollector();
   const react =
     active.react && reactCfg ? new ReactCollector(reactCfg) : createDisabledReactCollector();
   const events =

@@ -387,6 +387,46 @@ test('NetworkCollector excludes the production reporter endpoint by default', as
   }
 });
 
+test('NetworkCollector keeps excluding the reporter endpoint after setFilter', async () => {
+  const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch },
+  });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: ['network'],
+    report: {
+      endpoint: '/monitor',
+      interval: 60_000,
+    },
+  });
+
+  try {
+    monitor.start();
+    monitor.network.setFilter((url) => !url.includes('/private'));
+
+    const testWindow = globalThis.window as unknown as { fetch: typeof globalThis.fetch };
+
+    await testWindow.fetch('/monitor');
+    await testWindow.fetch('/private');
+    await testWindow.fetch('/api/orders');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(monitor.network.snapshot.value.entries.map((entry) => entry.url)).toEqual([
+      '/api/orders',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
 test('NetworkCollector restores fetch when stopped', () => {
   const fetch: typeof globalThis.fetch = jest.fn(async () => new Response());
 
