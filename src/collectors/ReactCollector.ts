@@ -15,6 +15,7 @@ interface Fiber {
   alternate: Fiber | null;
   child: Fiber | null;
   sibling: Fiber | null;
+  flags?: number;
   actualDuration?: number;
 }
 
@@ -159,6 +160,36 @@ function subscribeToReactCommits(listener: ReactCommitListener): () => void {
 const REACT_MEMO_TYPE = Symbol.for('react.memo');
 const REACT_FORWARD_REF_TYPE = Symbol.for('react.forward_ref');
 const DEFAULT_MAX_FIBER_VISITS = 10_000;
+// Fiber flag React sets when a component actually rendered (the same check React DevTools uses).
+const PERFORMED_WORK = 0b1;
+
+/** Mounted in this commit, or re-rendered instead of bailing out. */
+function didRender(fiber: Fiber): boolean {
+  return (
+    fiber.alternate === null ||
+    typeof fiber.flags !== 'number' ||
+    (fiber.flags & PERFORMED_WORK) !== 0
+  );
+}
+
+/**
+ * A bailed-out subtree keeps the previous commit's fibers, with stale durations and flags.
+ * React only replaces the child list when the subtree did work.
+ */
+function didSubtreeChange(fiber: Fiber): boolean {
+  return fiber.alternate === null || fiber.child !== fiber.alternate.child;
+}
+
+/** `actualDuration` includes descendants; subtract the direct children to get the fiber's own time. */
+function getSelfDuration(fiber: Fiber): number {
+  let duration = fiber.actualDuration ?? 0;
+
+  for (let { child } = fiber; child; child = child.sibling) {
+    duration -= child.actualDuration ?? 0;
+  }
+
+  return Math.max(0, duration);
+}
 
 function normalizeMaxFiberVisits(value: number | undefined): number {
   if (value === Number.POSITIVE_INFINITY) {
@@ -362,10 +393,12 @@ export class ReactCollector implements IReactCollector {
 
       visited += 1;
 
-      const name = this.#getComponentName(current.type);
-      const duration = current.actualDuration ?? 0;
+      const name = didRender(current) ? this.#getComponentName(current.type) : null;
+      // Only development and profiling builds time renders; coarse browser timers may still read 0.
+      const profiled = typeof current.actualDuration === 'number';
+      const duration = name && profiled ? getSelfDuration(current) : 0;
 
-      if (name && (duration > 0 || this.config.includeZeroDuration === true)) {
+      if (name && (profiled || this.config.includeZeroDuration === true)) {
         entries.push({
           component: name,
           duration: Math.round(duration * 10) / 10,
@@ -379,7 +412,7 @@ export class ReactCollector implements IReactCollector {
         stack.push(current.sibling);
       }
 
-      if (current.child) {
+      if (current.child && didSubtreeChange(current)) {
         stack.push(current.child);
       }
     }

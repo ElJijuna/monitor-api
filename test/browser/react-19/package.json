@@ -1,0 +1,9 @@
+{
+    "name": "monitor-api-react-19-fixture",
+    "private": true,
+    "description": "React 19 for the browser tests. Kept apart because its peer range conflicts with the root React 18.",
+    "dependencies": {
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0"
+    }
+}

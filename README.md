@@ -285,8 +285,12 @@ monitor.react.clearLog()
 
 Traversal is iterative and visits at most 10,000 fibers per commit by default.
 Set `maxFiberVisits` to another limit (`Infinity` disables the cap). Commits that
-reach the cap increment `truncatedCommits`. Fibers with `actualDuration <= 0` are
-ignored unless `includeZeroDuration: true` is configured. Unmounts come from the
+reach the cap increment `truncatedCommits`. Only components that actually rendered
+in a commit are recorded: memoized components and subtrees that React skipped are
+not counted. `duration` is the component's own render time, excluding its children,
+so a slow child is not also blamed on its parents. Builds without React profiling
+timings record nothing unless `includeZeroDuration: true` is configured, which
+records renders with a duration of 0. Unmounts come from the
 dedicated React DevTools hook rather than private Fiber flags. They remain in
 `entries`/`onCommit`, but do not inflate render aggregates or `slowComponents`.
 
@@ -295,7 +299,7 @@ dedicated React DevTools hook rather than private Fiber flags. They remain in
 ```ts
 interface RenderEntry {
   component: string         // displayName or function.name
-  duration: number          // ms (actualDuration — 0 in prod without profiling build)
+  duration: number          // ms of the component's own render, excluding children (0 without profiling)
   timestamp: number
   type: 'mount' | 'update' | 'unmount'
   commitId: number
@@ -646,7 +650,7 @@ createMonitor({
     react: {
       slowThreshold: 8,            // default 16ms
       maxFiberVisits: 10_000,      // default 10,000
-      includeZeroDuration: false,  // default false
+      includeZeroDuration: false,  // default false; record renders without profiling timings
     },
     events: {
       maxLabelLength: 256,          // default 256 characters

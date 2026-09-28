@@ -20,6 +20,20 @@ updates:
           - minor
           - patch
 
+  # React 19 for the browser tests, kept apart from the root React 18.
+  - package-ecosystem: npm
+    directory: /test/browser/react-19
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Lima
+    groups:
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -8,10 +8,10 @@ export interface RenderEntry {
   /** Component display name or function/class name. */
   component: string;
   /**
-   * Render duration in milliseconds.
+   * Time in milliseconds spent rendering this component itself, excluding its children.
    *
-   * React only exposes meaningful `actualDuration` values in development or
-   * production profiling builds. Other builds may report 0.
+   * React only times renders in development or production profiling builds. Other builds
+   * report 0 (see `includeZeroDuration`).
    */
   duration: number;
   /** Unix timestamp in milliseconds for when the commit was observed. */
@@ -26,7 +26,7 @@ export interface RenderEntry {
 export interface ComponentStats {
   /** Number of retained render entries for the component. */
   renders: number;
-  /** Sum of retained render durations in milliseconds. */
+  /** Sum of retained render durations in milliseconds, excluding children. */
   totalDuration: number;
   /** Average retained render duration in milliseconds. */
   avgDuration: number;
@@ -54,7 +54,10 @@ export interface ReactCollectorConfig {
   maxHistory: number;
   /** Duration in milliseconds used to classify a render as slow. */
   slowThreshold: number;
-  /** Includes fibers whose profiling duration is zero. Defaults to false. */
+  /**
+   * Records renders even when React provides no profiling timings (standard production builds),
+   * with a duration of 0. Defaults to false.
+   */
   includeZeroDuration?: boolean;
   /** Maximum fibers visited per commit. Defaults to 10,000; use Infinity to disable. */
   maxFiberVisits?: number;
