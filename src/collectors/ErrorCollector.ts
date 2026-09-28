@@ -186,39 +186,22 @@ export class ErrorCollector implements IErrorCollector {
     }
 
     const now = Date.now();
+    const prev = this.#entries.value;
+    const last = prev[prev.length - 1];
 
-    this.#entries.value = (prev) => {
-      const last = prev[prev.length - 1];
+    let entry: MonitorError;
+    let next: MonitorError[];
 
-      if (
-        last &&
-        now - last.lastSeenAt <= this.#dedupWindow &&
-        isSameError(last, details, source)
-      ) {
-        const updated = {
-          ...last,
-          lastSeenAt: now,
-          occurrences: last.occurrences + 1,
-        };
-        const next = [...prev.slice(0, -1), updated];
+    if (last && now - last.lastSeenAt <= this.#dedupWindow && isSameError(last, details, source)) {
+      entry = { ...last, lastSeenAt: now, occurrences: last.occurrences + 1 };
+      next = [...prev.slice(0, -1), entry];
+    } else {
+      entry = { id: uid(), source, details, timestamp: now, lastSeenAt: now, occurrences: 1 };
+      next = appendHistory(prev, [entry], this.config.maxHistory);
+    }
 
-        this.onError.value = updated;
-
-        return next;
-      }
-
-      const entry: MonitorError = {
-        id: uid(),
-        source,
-        details,
-        timestamp: now,
-        lastSeenAt: now,
-        occurrences: 1,
-      };
-
-      this.onError.value = entry;
-
-      return appendHistory(prev, [entry], this.config.maxHistory);
-    };
+    // Commit the history first so onError subscribers observe a snapshot that includes the entry.
+    this.#entries.value = next;
+    this.onError.value = entry;
   }
 }

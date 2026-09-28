@@ -41,6 +41,32 @@ test('ErrorCollector captures manual errors with bounded details', () => {
   }
 });
 
+test('ErrorCollector notifies onError after the entry is retained', () => {
+  const monitor = createMonitor({ collectors: { errors: { dedupWindow: 60_000 } } });
+  const seen: Array<{ occurrences: number; retained: number | undefined }> = [];
+
+  try {
+    monitor.errors.onError.subscribe((error) => {
+      const snapshot = monitor.errors.snapshot.value;
+
+      seen.push({
+        occurrences: error?.occurrences ?? 0,
+        retained: snapshot.entries.find((entry) => entry.id === error?.id)?.occurrences,
+      });
+    });
+
+    monitor.errors.capture(new Error('boom'));
+    monitor.errors.capture(new Error('boom'));
+
+    expect(seen).toEqual([
+      { occurrences: 1, retained: 1 },
+      { occurrences: 2, retained: 2 },
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
 test('ErrorCollector is disabled by default and inert when sampled out', () => {
   const implicit = createMonitor();
   const sampledOut = createMonitor({ sampleRate: 0, collectors: ['errors'] });
