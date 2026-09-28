@@ -39,8 +39,9 @@ jobs:
       - name: Browser test
         run: npm run test:browser
 
-      - name: Build
-        run: npm run build
+      # Builds, lints the package with publint, and loads it through both require and import.
+      - name: Build and verify package
+        run: npm run test:package
 
       - name: Build docs
         run: npm run docs:build

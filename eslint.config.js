@@ -1,25 +1,25 @@
-import eslintJest from 'super-configs/eslint/jest';
-import eslintTs from 'super-configs/eslint/ts';
+import { createEslintConfig } from 'super-configs/eslint';
 
-export default [
-  {
-    ignores: [
-      'dist/**',
-      'docs/**',
-      'coverage/**',
-      'node_modules/**',
-      'bench/**',
-      'demo/**',
-      'test/browser/**',
-      '*.cjs',
-    ],
-  },
-  ...eslintTs,
-  ...eslintJest,
-  {
-    rules: {
-      '@stylistic/brace-style': 'off',
-      '@stylistic/indent': 'off',
+export default createEslintConfig({
+  runtime: 'node',
+  language: 'ts',
+  testFramework: 'jest',
+  ignores: [
+    'dist/**',
+    'docs/**',
+    'coverage/**',
+    'node_modules/**',
+    'bench/**',
+    'demo/**',
+    'test/browser/**',
+    '**/*.cjs',
+  ],
+  overrides: [
+    {
+      rules: {
+        '@stylistic/brace-style': 'off',
+        '@stylistic/indent': 'off',
+      },
     },
-  },
-];
+  ],
+});
