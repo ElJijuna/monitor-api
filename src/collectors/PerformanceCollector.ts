@@ -1,6 +1,5 @@
 import SSignal, { batch, type ComputedSignal, computed } from 'ssignal';
 import { appendHistory, validateMaxHistory } from '../core/retainHistory';
-import { shallowEqual } from '../core/shallowEqual';
 import type {
   IPerformanceCollector,
   LongAnimationFrameEntry,
@@ -151,9 +150,6 @@ export class PerformanceCollector implements IPerformanceCollector {
         longAnimationFrames,
         cls,
       }),
-      // A batch of several sources recomputes once per source; the later, identical snapshots
-      // must not notify again.
-      { equals: shallowEqual },
     );
   }
 

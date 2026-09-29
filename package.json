@@ -77,7 +77,7 @@
         "test:package": "npm run build && publint --strict && node test/package/smoke.cjs && node test/package/smoke.mjs"
     },
     "dependencies": {
-        "ssignal": "^1.9.0",
+        "ssignal": "^1.9.1",
         "web-vitals": "^6.2.2"
     },
     "devDependencies": {
