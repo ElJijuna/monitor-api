@@ -2,11 +2,79 @@ import SSignal, { type ComputedSignal, computed } from 'ssignal';
 import { appendHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   IPerformanceCollector,
+  LongAnimationFrameEntry,
+  LongAnimationFrameInfo,
+  LongAnimationFrameScript,
   LongTaskInfo,
   MemoryInfo,
   PerformanceCollectorConfig,
   PerformanceSnapshot,
 } from '../core/types';
+
+const MAX_LOAF_SCRIPTS = 5;
+const MAX_LOAF_STRING = 500;
+
+/** The fields read from a `PerformanceScriptTiming`, which TypeScript's DOM lib does not declare. */
+interface ScriptTiming {
+  invokerType?: unknown;
+  invoker?: unknown;
+  sourceURL?: unknown;
+  sourceFunctionName?: unknown;
+  duration: number;
+  forcedStyleAndLayoutDuration?: unknown;
+  pauseDuration?: unknown;
+}
+
+/** The fields read from a `PerformanceLongAnimationFrameTiming`. */
+interface AnimationFrameTiming extends PerformanceEntry {
+  blockingDuration?: unknown;
+  renderStart?: unknown;
+  styleAndLayoutStart?: unknown;
+  firstUIEventTimestamp?: unknown;
+  scripts?: readonly ScriptTiming[];
+}
+
+const emptyLongAnimationFrames = (): LongAnimationFrameInfo => ({
+  count: 0,
+  totalBlockingDuration: 0,
+  maxBlockingDuration: null,
+  entries: [],
+});
+
+function boundedString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value.slice(0, MAX_LOAF_STRING) : null;
+}
+
+function finiteOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/** Copies only serializable fields; the browser's entries and their scripts are not retained. */
+function summarizeFrame(frame: AnimationFrameTiming): LongAnimationFrameEntry {
+  const scripts: LongAnimationFrameScript[] = [...(frame.scripts ?? [])]
+    .sort((left, right) => right.duration - left.duration)
+    .slice(0, MAX_LOAF_SCRIPTS)
+    .map((script) => ({
+      invokerType: boundedString(script.invokerType),
+      invoker: boundedString(script.invoker),
+      sourceURL: boundedString(script.sourceURL),
+      sourceFunctionName: boundedString(script.sourceFunctionName),
+      duration: finiteOrZero(script.duration),
+      forcedStyleAndLayoutDuration: finiteOrZero(script.forcedStyleAndLayoutDuration),
+      pauseDuration: finiteOrZero(script.pauseDuration),
+    }));
+
+  return {
+    startTime: frame.startTime,
+    duration: frame.duration,
+    blockingDuration: finiteOrZero(frame.blockingDuration),
+    renderStart: finiteOrZero(frame.renderStart),
+    styleAndLayoutStart: finiteOrZero(frame.styleAndLayoutStart),
+    firstUIEventTimestamp: finiteOrZero(frame.firstUIEventTimestamp),
+    scripts,
+    timestamp: Math.round(performance.timeOrigin + frame.startTime + frame.duration),
+  };
+}
 
 declare global {
   interface Performance {
@@ -25,6 +93,7 @@ export class PerformanceCollector implements IPerformanceCollector {
   readonly memory: SSignal<MemoryInfo | null>;
   readonly memoryHistory: SSignal<number[]>;
   readonly longTasks: SSignal<LongTaskInfo>;
+  readonly longAnimationFrames: SSignal<LongAnimationFrameInfo>;
   readonly cls: SSignal<number>;
   readonly snapshot: ComputedSignal<PerformanceSnapshot>;
 
@@ -33,6 +102,10 @@ export class PerformanceCollector implements IPerformanceCollector {
   #lastFpsTime = 0;
   #longTaskObserver: PerformanceObserver | null = null;
   #clsObserver: PerformanceObserver | null = null;
+  #loafObserver: PerformanceObserver | null = null;
+  #loafStarted = false;
+  /** `performance.now()` of the latest restart; buffered frames before it were already counted. */
+  #loafAcceptFrom = 0;
   #memoryInterval: ReturnType<typeof setInterval> | null = null;
   #started = false;
   #generation = 0;
@@ -47,16 +120,34 @@ export class PerformanceCollector implements IPerformanceCollector {
     this.memory = new SSignal<MemoryInfo | null>(this.#readMemory());
     this.memoryHistory = new SSignal<number[]>([]);
     this.longTasks = new SSignal<LongTaskInfo>({ count: 0, lastDuration: null });
+    this.longAnimationFrames = new SSignal(emptyLongAnimationFrames());
     this.cls = new SSignal(0);
 
     this.snapshot = computed(
-      [this.fps, this.fpsHistory, this.memory, this.memoryHistory, this.longTasks, this.cls],
-      ([fps, fpsHistory, memory, memoryHistory, longTasks, cls]): PerformanceSnapshot => ({
+      [
+        this.fps,
+        this.fpsHistory,
+        this.memory,
+        this.memoryHistory,
+        this.longTasks,
+        this.longAnimationFrames,
+        this.cls,
+      ],
+      ([
         fps,
         fpsHistory,
         memory,
         memoryHistory,
         longTasks,
+        longAnimationFrames,
+        cls,
+      ]): PerformanceSnapshot => ({
+        fps,
+        fpsHistory,
+        memory,
+        memoryHistory,
+        longTasks,
+        longAnimationFrames,
         cls,
       }),
     );
@@ -80,6 +171,7 @@ export class PerformanceCollector implements IPerformanceCollector {
     this.#startFps();
     this.#startMemory();
     this.#startLongTasks();
+    this.#startLongAnimationFrames();
     this.#startCls();
   }
 
@@ -107,8 +199,10 @@ export class PerformanceCollector implements IPerformanceCollector {
 
     this.#longTaskObserver?.disconnect();
     this.#clsObserver?.disconnect();
+    this.#loafObserver?.disconnect();
     this.#longTaskObserver = null;
     this.#clsObserver = null;
+    this.#loafObserver = null;
   }
 
   destroy(): void {
@@ -124,6 +218,7 @@ export class PerformanceCollector implements IPerformanceCollector {
   clearHistory(): void {
     this.fpsHistory.value = [];
     this.memoryHistory.value = [];
+    this.longAnimationFrames.value = (prev: LongAnimationFrameInfo) => ({ ...prev, entries: [] });
   }
 
   #startFps(): void {
@@ -218,6 +313,55 @@ export class PerformanceCollector implements IPerformanceCollector {
     } catch {
       // longtask not supported in this browser
     }
+  }
+
+  #startLongAnimationFrames(): void {
+    const generation = this.#generation;
+
+    // Buffered delivery includes frames from page load; after a restart those were already counted.
+    this.#loafAcceptFrom = this.#loafStarted ? performance.now() : 0;
+    this.#loafStarted = true;
+
+    try {
+      this.#loafObserver = new PerformanceObserver((list) => {
+        if (!this.#started || generation !== this.#generation) {
+          return;
+        }
+
+        this.#recordLongAnimationFrames(list.getEntries() as AnimationFrameTiming[]);
+      });
+      this.#loafObserver.observe({ type: 'long-animation-frame', buffered: true });
+    } catch {
+      // long-animation-frame not supported in this browser
+      this.#loafObserver = null;
+    }
+  }
+
+  /** Folds one observer batch into a single update. */
+  #recordLongAnimationFrames(frames: AnimationFrameTiming[]): void {
+    const added = frames
+      .filter((frame) => frame.startTime + frame.duration >= this.#loafAcceptFrom)
+      .map(summarizeFrame);
+
+    if (added.length === 0) {
+      return;
+    }
+
+    this.longAnimationFrames.value = (prev: LongAnimationFrameInfo) => {
+      let { totalBlockingDuration, maxBlockingDuration } = prev;
+
+      for (const frame of added) {
+        totalBlockingDuration += frame.blockingDuration;
+        maxBlockingDuration = Math.max(maxBlockingDuration ?? 0, frame.blockingDuration);
+      }
+
+      return {
+        count: prev.count + added.length,
+        totalBlockingDuration,
+        maxBlockingDuration,
+        entries: appendHistory(prev.entries, added, this.config.maxHistory),
+      };
+    };
   }
 
   #startCls(): void {

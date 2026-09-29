@@ -24,6 +24,9 @@ export type {
   IResourceCollector,
   IWebVitalsCollector,
   LCPAttributionSummary,
+  LongAnimationFrameEntry,
+  LongAnimationFrameInfo,
+  LongAnimationFrameScript,
   LongTaskInfo,
   MemoryInfo,
   // Core

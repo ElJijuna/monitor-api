@@ -137,7 +137,7 @@ collectors you need, and use `report.transform` to send a compact payload.
 
 ### PerformanceCollector
 
-Captures FPS, JS heap memory, Long Tasks, and Cumulative Layout Shift (CLS).
+Captures FPS, JS heap memory, Long Tasks, Long Animation Frames (LoAF), and Cumulative Layout Shift (CLS).
 
 ```ts
 monitor.start()
@@ -159,6 +159,18 @@ monitor.performance.longTasks.subscribe(({ count, lastDuration }) => {
   console.log(`Long tasks: ${count} total, last was ${lastDuration}ms`)
 })
 
+// Long Animation Frames: which scripts made a frame slow (Chromium 123+)
+monitor.performance.longAnimationFrames.subscribe(({ count, maxBlockingDuration, entries }) => {
+  const latest = entries[entries.length - 1]
+  const culprit = latest?.scripts[0]
+
+  console.log(`Long frames: ${count}, worst blocked input for ${maxBlockingDuration}ms`)
+
+  if (culprit) {
+    console.log(`Longest script: ${culprit.invoker} (${culprit.sourceURL}) took ${culprit.duration}ms`)
+  }
+})
+
 monitor.performance.cls.subscribe((cls) => {
   console.log('Cumulative Layout Shift:', cls.toFixed(4))
 })
@@ -173,13 +185,14 @@ monitor.performance.snapshot.subscribe((snap) => {
     memory: { used: 45.2, total: 2048, percent: 2.2 },
     memoryHistory: [2.1, 2.2, 2.2],
     longTasks: { count: 3, lastDuration: 82.5 },
+    longAnimationFrames: { count: 2, totalBlockingDuration: 140, maxBlockingDuration: 90, entries: [...] },
     cls: 0.0023
   }
   */
 })
 
 // Utilities
-monitor.performance.clearHistory()  // reset fpsHistory + memoryHistory
+monitor.performance.clearHistory()  // reset fpsHistory, memoryHistory and recent long animation frames
 ```
 
 **Snapshot shape:**
@@ -191,9 +204,36 @@ interface PerformanceSnapshot {
   memory: { used: number; total: number; percent: number } | null
   memoryHistory: number[]
   longTasks: { count: number; lastDuration: number | null }
+  longAnimationFrames: {
+    count: number
+    totalBlockingDuration: number
+    maxBlockingDuration: number | null
+    entries: LongAnimationFrameEntry[] // recent frames, capped by maxHistory
+  }
   cls: number
 }
+
+interface LongAnimationFrameEntry {
+  startTime: number
+  duration: number
+  blockingDuration: number
+  renderStart: number
+  styleAndLayoutStart: number
+  firstUIEventTimestamp: number
+  scripts: {
+    invokerType: string | null // 'event-listener', 'user-callback', 'classic-script', …
+    invoker: string | null     // 'BUTTON#save.onclick', a script URL, …
+    sourceURL: string | null
+    sourceFunctionName: string | null
+    duration: number
+    forcedStyleAndLayoutDuration: number
+    pauseDuration: number
+  }[] // the five longest scripts, longest first
+  timestamp: number
+}
 ```
+
+> **Long Animation Frames** need a browser with the [Long Animation Frames API](https://developer.chrome.com/docs/web-platform/long-animation-frames) (Chromium 123+); elsewhere `longAnimationFrames` stays empty. Frames from page load are included on the first `start()`. Script strings are capped at 500 characters and stay in the browser: the default production report sends only `count`, `totalBlockingDuration` and `maxBlockingDuration`.
 
 > **Note:** `memory` is `null` on non-Chrome browsers. `actualDuration` for React components requires a dev build or `react-dom/profiling` in production.
 

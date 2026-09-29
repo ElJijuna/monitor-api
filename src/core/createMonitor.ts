@@ -70,6 +70,12 @@ function createDefaultReportPayload(snap: MonitorSnapshot, includeResources: boo
       fps: snap.performance.fps,
       memoryPercent: snap.performance.memory?.percent ?? null,
       longTasks: snap.performance.longTasks,
+      // Counters only: script URLs and invokers stay local.
+      longAnimationFrames: {
+        count: snap.performance.longAnimationFrames.count,
+        totalBlockingDuration: snap.performance.longAnimationFrames.totalBlockingDuration,
+        maxBlockingDuration: snap.performance.longAnimationFrames.maxBlockingDuration,
+      },
       cls: snap.performance.cls,
     },
     network: {

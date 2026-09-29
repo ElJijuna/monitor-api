@@ -9,7 +9,7 @@ third-party analytics endpoint.
 
 | Collector | Data kept in memory | Data sent by the default reporter |
 | --- | --- | --- |
-| Performance | FPS, heap percentage when available, long-task and CLS aggregates | Current values and aggregates |
+| Performance | FPS, heap percentage when available, long-task and CLS aggregates; recent long animation frames with phase timings and, for their five longest scripts, the invoker, invoker type, source URL, and function name | Current values and aggregates; long animation frame counters only (count, total and maximum blocking duration) |
 | Network | Request URL, method, status, duration, type, and timestamp | Five-second aggregate only |
 | React | Component names, render durations, commits, and derived counts | Commit, truncation, and slow-render counts only |
 | Events | Application labels and serializable custom payloads | Retained event count only |
@@ -28,7 +28,8 @@ Reporting runs only when `env: 'production'` and `report.endpoint` or a custom
 transport is provided. The built-in payload is an allowlist. It excludes request
 URLs, headers and bodies; resource URLs; event labels and payloads; component names; error
 messages and stacks; Web Vital IDs and navigation types; Web Vitals attribution
-selectors, URLs, and script invokers; and all retained histories. The report endpoint is excluded from network instrumentation.
+selectors, URLs, and script invokers; long animation frame entries and their script
+URLs, invokers, and function names; and all retained histories. The report endpoint is excluded from network instrumentation.
 
 `report.transform` receives the complete in-memory snapshot and replaces that
 allowlist. Treat it as a data-export boundary. Remove credentials, tokens,

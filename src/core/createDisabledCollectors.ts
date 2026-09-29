@@ -8,6 +8,7 @@ import type {
   IReactCollector,
   IResourceCollector,
   IWebVitalsCollector,
+  LongAnimationFrameInfo,
   LongTaskInfo,
   MemoryInfo,
   MonitorError,
@@ -29,6 +30,12 @@ export function createDisabledPerformanceCollector(): IPerformanceCollector {
   const memory = new SSignal<MemoryInfo | null>(null);
   const memoryHistory = new SSignal<number[]>([]);
   const longTasks = new SSignal<LongTaskInfo>({ count: 0, lastDuration: null });
+  const longAnimationFrames = new SSignal<LongAnimationFrameInfo>({
+    count: 0,
+    totalBlockingDuration: 0,
+    maxBlockingDuration: null,
+    entries: [],
+  });
   const cls = new SSignal(0);
   const snapshot = new SSignal<PerformanceSnapshot>({
     fps: 0,
@@ -36,6 +43,7 @@ export function createDisabledPerformanceCollector(): IPerformanceCollector {
     memory: null,
     memoryHistory: [],
     longTasks: { count: 0, lastDuration: null },
+    longAnimationFrames: longAnimationFrames.value,
     cls: 0,
   });
 
@@ -45,6 +53,7 @@ export function createDisabledPerformanceCollector(): IPerformanceCollector {
     memory,
     memoryHistory,
     longTasks,
+    longAnimationFrames,
     cls,
     snapshot,
     clearHistory: noop,

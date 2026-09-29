@@ -167,13 +167,14 @@ test('PerformanceCollector start is idempotent and stop releases its browser res
 
     expect(browser.requestAnimationFrame).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(1);
-    expect(browser.observe).toHaveBeenCalledTimes(2);
+    // longtask, long-animation-frame and layout-shift
+    expect(browser.observe).toHaveBeenCalledTimes(3);
 
     monitor.stop();
 
     expect(browser.cancelAnimationFrame).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(0);
-    expect(browser.disconnect).toHaveBeenCalledTimes(2);
+    expect(browser.disconnect).toHaveBeenCalledTimes(3);
 
     monitor.destroy();
   } finally {
@@ -423,4 +424,263 @@ test('PerformanceCollector tolerates unsupported PerformanceObserver entry types
   } finally {
     browser.restore();
   }
+});
+
+function frame(startTime: number, overrides: Record<string, unknown> = {}) {
+  return {
+    entryType: 'long-animation-frame',
+    name: 'long-animation-frame',
+    startTime,
+    duration: 120,
+    blockingDuration: 70,
+    renderStart: startTime + 100,
+    styleAndLayoutStart: startTime + 110,
+    firstUIEventTimestamp: startTime + 5,
+    scripts: [],
+    ...overrides,
+  };
+}
+
+function script(duration: number, overrides: Record<string, unknown> = {}) {
+  return {
+    invokerType: 'event-listener',
+    invoker: 'BUTTON#save.onclick',
+    sourceURL: 'https://app.example.com/main.js',
+    sourceFunctionName: 'save',
+    duration,
+    forcedStyleAndLayoutDuration: 3,
+    pauseDuration: 0,
+    ...overrides,
+  };
+}
+
+describe('long animation frames', () => {
+  test('summarizes frames with their longest scripts and keeps serializable fields only', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      browser.emit('long-animation-frame', [
+        frame(1_000, {
+          scripts: [
+            script(10, { sourceFunctionName: 'first' }),
+            script(40, { sourceFunctionName: 'longest', invoker: 'x'.repeat(900) }),
+            script(20, { sourceFunctionName: 'second' }),
+            script(5),
+            script(8),
+            script(30, { sourceFunctionName: 'third', sourceURL: '' }),
+          ],
+        }),
+      ]);
+
+      const info = monitor.performance.longAnimationFrames.value;
+      const [entry] = info.entries;
+
+      expect(info).toMatchObject({ count: 1, totalBlockingDuration: 70, maxBlockingDuration: 70 });
+      expect(entry).toMatchObject({
+        startTime: 1_000,
+        duration: 120,
+        blockingDuration: 70,
+        renderStart: 1_100,
+        styleAndLayoutStart: 1_110,
+        firstUIEventTimestamp: 1_005,
+        timestamp: Math.round(performance.timeOrigin + 1_120),
+      });
+      expect(entry?.scripts.map((item) => item.duration)).toEqual([40, 30, 20, 10, 8]);
+      expect(entry?.scripts[0]).toEqual({
+        invokerType: 'event-listener',
+        invoker: 'x'.repeat(500),
+        sourceURL: 'https://app.example.com/main.js',
+        sourceFunctionName: 'longest',
+        duration: 40,
+        forcedStyleAndLayoutDuration: 3,
+        pauseDuration: 0,
+      });
+      expect(entry?.scripts[1]?.sourceURL).toBeNull();
+      expect(monitor.performance.snapshot.value.longAnimationFrames).toBe(info);
+      expect(() => JSON.stringify(info)).not.toThrow();
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('accumulates counters in one update per batch and caps entries by maxHistory', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ maxHistory: 2, collectors: { performance: true } });
+      const notify = jest.fn();
+
+      monitor.start();
+      monitor.performance.longAnimationFrames.subscribe(notify);
+      browser.emit('long-animation-frame', [
+        frame(1_000, { blockingDuration: 10 }),
+        frame(2_000, { blockingDuration: 90 }),
+        frame(3_000, { blockingDuration: 40 }),
+      ]);
+
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(monitor.performance.longAnimationFrames.value).toMatchObject({
+        count: 3,
+        totalBlockingDuration: 140,
+        maxBlockingDuration: 90,
+      });
+      expect(
+        monitor.performance.longAnimationFrames.value.entries.map((entry) => entry.startTime),
+      ).toEqual([2_000, 3_000]);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('defaults missing or invalid timings to zero and scripts to an empty list', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      browser.emit('long-animation-frame', [
+        {
+          entryType: 'long-animation-frame',
+          name: 'long-animation-frame',
+          startTime: 50,
+          duration: 60,
+          blockingDuration: Number.NaN,
+        },
+      ]);
+
+      expect(monitor.performance.longAnimationFrames.value.entries[0]).toMatchObject({
+        blockingDuration: 0,
+        renderStart: 0,
+        styleAndLayoutStart: 0,
+        firstUIEventTimestamp: 0,
+        scripts: [],
+      });
+      expect(monitor.performance.longAnimationFrames.value.maxBlockingDuration).toBe(0);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('clearHistory drops recent frames but keeps the counters', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      browser.emit('long-animation-frame', [frame(1_000)]);
+      monitor.performance.clearHistory();
+
+      expect(monitor.performance.longAnimationFrames.value).toEqual({
+        count: 1,
+        totalBlockingDuration: 70,
+        maxBlockingDuration: 70,
+        entries: [],
+      });
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('a restart ignores buffered frames that ended before it', () => {
+    const browser = installPerformanceBrowser();
+    const now = jest.spyOn(performance, 'now');
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      browser.emit('long-animation-frame', [frame(1_000)]);
+      monitor.stop();
+
+      now.mockReturnValueOnce(5_000);
+      monitor.start();
+
+      const notify = jest.fn();
+
+      monitor.performance.longAnimationFrames.subscribe(notify);
+      // The buffered delivery repeats the page-load frame: nothing new, so no update.
+      browser.emit('long-animation-frame', [frame(1_000)]);
+      expect(notify).not.toHaveBeenCalled();
+
+      browser.emit('long-animation-frame', [frame(1_000), frame(6_000)]);
+
+      expect(
+        monitor.performance.longAnimationFrames.value.entries.map((entry) => entry.startTime),
+      ).toEqual([1_000, 6_000]);
+      expect(monitor.performance.longAnimationFrames.value.count).toBe(2);
+
+      monitor.destroy();
+    } finally {
+      now.mockRestore();
+      browser.restore();
+    }
+  });
+
+  test('the default report sends frame counters without script URLs or invokers', async () => {
+    const browser = installPerformanceBrowser();
+    const transport = jest.fn<(request: { body: string; payload: unknown }) => void>();
+
+    try {
+      const monitor = createMonitor({
+        env: 'production',
+        collectors: { performance: true },
+        report: { endpoint: '/metrics', interval: 60_000, transport, flushOnHide: false },
+      });
+
+      monitor.start();
+      browser.emit('long-animation-frame', [frame(1_000, { scripts: [script(40)] })]);
+
+      expect(await monitor.reporter.flush()).toBe(true);
+
+      const request = transport.mock.calls[0]?.[0];
+
+      expect(request?.payload).toMatchObject({
+        performance: {
+          longAnimationFrames: { count: 1, totalBlockingDuration: 70, maxBlockingDuration: 70 },
+        },
+      });
+      expect(request?.body).not.toMatch(/example\.com|BUTTON|save|entries/);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('ignores frames delivered after stop', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+
+      const stale = browser.observers.get('long-animation-frame');
+
+      monitor.stop();
+      stale?.(
+        { getEntries: () => [frame(1_000)] } as unknown as PerformanceObserverEntryList,
+        {} as PerformanceObserver,
+      );
+
+      expect(monitor.performance.longAnimationFrames.value.count).toBe(0);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
 });
