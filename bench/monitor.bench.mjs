@@ -33,6 +33,24 @@ function formatDuration(value) {
   return `${formatNumber(value)} ms`;
 }
 
+/** Awaits every operation, so async cases include their promise and microtask costs. */
+async function runLoopAsync(fn, durationMs) {
+  let iterations = 0;
+  const start = performance.now();
+  let elapsed = 0;
+
+  do {
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      await fn();
+    }
+
+    iterations += BATCH_SIZE;
+    elapsed = performance.now() - start;
+  } while (elapsed < durationMs);
+
+  return { elapsed, iterations };
+}
+
 function runLoop(fn, durationMs) {
   let iterations = 0;
   const start = performance.now();
@@ -59,14 +77,16 @@ function endJob() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function bench(name, fn) {
+async function bench(name, fn, { async = false, warmupMs = WARMUP_MS } = {}) {
+  const loop = async ? runLoopAsync : runLoop;
+
   await endJob();
-  runLoop(fn, WARMUP_MS);
+  await loop(fn, warmupMs);
   const samples = [];
 
   for (let i = 0; i < SAMPLE_COUNT; i++) {
     await endJob();
-    const { elapsed, iterations } = runLoop(fn, SAMPLE_MS);
+    const { elapsed, iterations } = await loop(fn, SAMPLE_MS);
 
     samples.push({
       hz: iterations / (elapsed / 1000),
@@ -77,8 +97,10 @@ async function bench(name, fn) {
 
   samples.sort((a, b) => a.hz - b.hz);
   const median = samples[Math.floor(samples.length / 2)];
+  // Half the sample range relative to the median: a rough noise band for comparing runs.
+  const spread = ((samples[samples.length - 1].hz - samples[0].hz) / 2 / median.hz) * 100;
 
-  return { name, ...median };
+  return { name, ...median, spread };
 }
 
 function print(results) {
@@ -87,7 +109,7 @@ function print(results) {
   console.log('\nmonitor-api benchmarks\n');
   for (const result of results) {
     console.log(
-      `${result.name.padEnd(longestName)}  ${formatNumber(result.hz).padStart(12)} ops/s  ${formatDuration(result.avgMs).padStart(10)} avg`,
+      `${result.name.padEnd(longestName)}  ${formatNumber(result.hz).padStart(12)} ops/s  ${formatDuration(result.avgMs).padStart(10)} avg  ±${result.spread.toFixed(1).padStart(4)}%`,
     );
   }
   console.log('');
@@ -95,6 +117,12 @@ function print(results) {
 
 function withEventWindow() {
   globalThis.window = new EventTarget();
+}
+
+function withFetchWindow() {
+  const response = new Response(null, { status: 200, headers: { 'content-length': '512' } });
+
+  globalThis.window = { fetch: async () => response };
 }
 
 function withReactWindow() {
@@ -238,6 +266,73 @@ async function runBenchmarks() {
   );
   resetWebVitalsBrowser();
 
+  withFetchWindow();
+  const unpatchedFetch = globalThis.window.fetch;
+  results.push(
+    await bench('fetch baseline (unpatched)', () => unpatchedFetch('/api/items'), { async: true }),
+  );
+  const networkMonitor = createMonitor({ collectors: { network: true } });
+  networkMonitor.start();
+  // The collector aggregates the last 5 s in per-millisecond buckets, so its cost per request
+  // grows until the window is full. Warming up past 5 s measures the steady state.
+  results.push(
+    await bench(
+      'fetch through the network collector',
+      () => globalThis.window.fetch('/api/items'),
+      {
+        async: true,
+        warmupMs: 5_500,
+      },
+    ),
+  );
+  networkMonitor.destroy();
+  Reflect.deleteProperty(globalThis, 'window');
+
+  const errorMonitor = createMonitor({ collectors: { errors: true } });
+  const errors = Array.from({ length: 20 }, (_, i) => new Error(`bench error ${i}`));
+  let errorCount = 0;
+  results.push(
+    await bench('errors.capture', () => {
+      errorMonitor.errors.capture(errors[errorCount++ % errors.length]);
+    }),
+  );
+  errorMonitor.destroy();
+
+  const noopTransport = () => {};
+  const defaultReportMonitor = createMonitor({
+    env: 'production',
+    report: { endpoint: '/metrics', interval: 60_000, transport: noopTransport },
+  });
+  defaultReportMonitor.start();
+  results.push(
+    await bench('reporter flush (default payload)', () => defaultReportMonitor.reporter.flush(), {
+      async: true,
+    }),
+  );
+  defaultReportMonitor.destroy();
+
+  // About 32 KB of JSON with multi-byte text, below the default 64 KB payload limit.
+  const largePayload = {
+    items: Array.from({ length: 740 }, (_, i) => ({ id: i, label: `évènement ${i} — ok` })),
+  };
+  const largeReportMonitor = createMonitor({
+    collectors: [],
+    env: 'production',
+    report: {
+      endpoint: '/metrics',
+      interval: 60_000,
+      transport: noopTransport,
+      transform: () => largePayload,
+    },
+  });
+  largeReportMonitor.start();
+  results.push(
+    await bench('reporter flush (32 KB transform)', () => largeReportMonitor.reporter.flush(), {
+      async: true,
+    }),
+  );
+  largeReportMonitor.destroy();
+
   withReactWindow();
   const reactMonitor = createMonitor({
     maxHistory: 500,
@@ -264,6 +359,20 @@ async function runBenchmarks() {
     }),
   );
   reactMonitor.destroy();
+
+  // A long history makes each commit copy the retained entries and rebuild byComponent from them.
+  const longHistoryMonitor = createMonitor({
+    maxHistory: 5_000,
+    collectors: { react: true },
+  });
+  longHistoryMonitor.start();
+  const longHistoryHook = globalThis.window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  results.push(
+    await bench('React commit with 50 fibers, 5,000 history', () => {
+      longHistoryHook.onCommitFiberRoot(1, root);
+    }),
+  );
+  longHistoryMonitor.destroy();
 
   Reflect.deleteProperty(globalThis, 'window');
 
