@@ -38,6 +38,11 @@ export interface ProductionReportRequest {
   body: string;
   /** Final headers after applying monitor defaults and user overrides. */
   headers: Readonly<Record<string, string>>;
+  /**
+   * True for the final report sent while the page is being hidden or unloaded. Such a request
+   * must outlive the page, for example through `fetch` with `keepalive` or `navigator.sendBeacon`.
+   */
+  keepalive: boolean;
   /** Aborted on timeout, stop, or destroy. Custom transports should honor cancellation. */
   signal?: AbortSignal;
 }
@@ -76,6 +81,11 @@ export interface ProductionReportConfig {
   maxPayloadBytes?: number;
   /** Optional policy for retrying failed or timed-out deliveries. */
   retry?: ProductionReportRetryPolicy;
+  /**
+   * Sends one final report, without retries, when the page is hidden or unloaded, so data
+   * captured since the last interval is not lost. Defaults to `true`.
+   */
+  flushOnHide?: boolean;
   /**
    * Optional mapper used to customize the payload before it is posted. It receives the full,
    * potentially sensitive snapshot; without it, the reporter sends only bounded aggregates.

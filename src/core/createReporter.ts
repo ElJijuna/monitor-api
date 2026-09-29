@@ -87,11 +87,15 @@ function cancellable<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise
   });
 }
 
-async function postReport(request: Omit<ProductionReportRequest, 'signal'>, signal: AbortSignal) {
+async function postReport(
+  request: Omit<ProductionReportRequest, 'signal'>,
+  signal: AbortSignal | null = null,
+) {
   const response = await fetch(request.endpoint, {
     method: 'POST',
     headers: request.headers,
     body: request.body,
+    keepalive: request.keepalive,
     signal,
   });
 
@@ -182,10 +186,43 @@ export function createReporter(
   let started = false;
   let destroyed = false;
   let active: { controller: AbortController; promise: Promise<boolean> } | null = null;
+  let hiddenFlushSent = false;
 
   const update = (patch: Partial<ReporterSnapshot>) => {
     state.value = { ...state.value, ...patch };
   };
+
+  /** Builds the request, or returns the stage at which the report had to be dropped. */
+  function prepare(config: ProductionReportConfig, keepalive: boolean) {
+    let stage: ReportFailure = 'transform';
+
+    try {
+      const payload = getPayload();
+
+      stage = 'serialization';
+      const body = JSON.stringify(payload);
+
+      if (body === undefined) {
+        throw new DeliveryError('serialization');
+      }
+
+      stage = 'payload-too-large';
+
+      if (new TextEncoder().encode(body).byteLength > (config.maxPayloadBytes ?? 65_536)) {
+        throw new DeliveryError(stage);
+      }
+
+      return {
+        endpoint: config.endpoint,
+        payload,
+        body,
+        headers: { 'Content-Type': 'application/json', ...config.headers },
+        keepalive,
+      };
+    } catch {
+      return stage;
+    }
+  }
 
   async function deliver(
     config: ProductionReportConfig,
@@ -275,28 +312,11 @@ export function createReporter(
     };
 
     active = run;
-    let payload: unknown;
-    let body: string;
-    let stage: ReportFailure = 'transform';
+    const request = prepare(report, false);
 
-    try {
-      payload = getPayload();
-      stage = 'serialization';
-      const serialized = JSON.stringify(payload);
-
-      if (serialized === undefined) {
-        throw new DeliveryError('serialization');
-      }
-
-      body = serialized;
-      stage = 'payload-too-large';
-
-      if (new TextEncoder().encode(body).byteLength > (report.maxPayloadBytes ?? 65_536)) {
-        throw new DeliveryError(stage);
-      }
-    } catch {
+    if (typeof request === 'string') {
       if (!controller.signal.aborted) {
-        update({ dropped: state.value.dropped + 1, lastFailure: stage });
+        update({ dropped: state.value.dropped + 1, lastFailure: request });
       }
 
       if (active === run) {
@@ -316,16 +336,7 @@ export function createReporter(
 
     void (async () => {
       try {
-        const sent = await deliver(
-          report,
-          {
-            endpoint: report.endpoint,
-            payload,
-            body,
-            headers: { 'Content-Type': 'application/json', ...report.headers },
-          },
-          controller.signal,
-        );
+        const sent = await deliver(report, request, controller.signal);
 
         if (active === run) {
           active = null;
@@ -344,9 +355,86 @@ export function createReporter(
     return run.promise;
   }
 
+  /**
+   * The page may be frozen or discarded right after this, so the request is fire-and-forget: one
+   * attempt, no timeout, and not cancelled by stop or destroy. It runs even while an interval
+   * delivery is pending, because that one carries an older snapshot and may not survive the page.
+   */
+  function flushHidden(): void {
+    if (!started || destroyed || !report || hiddenFlushSent) {
+      return;
+    }
+
+    hiddenFlushSent = true;
+    const request = prepare(report, true);
+
+    // transform may stop or destroy the monitor.
+    if (!started || destroyed) {
+      return;
+    }
+
+    if (typeof request === 'string') {
+      update({ dropped: state.value.dropped + 1, lastFailure: request });
+
+      return;
+    }
+
+    update({ attempts: state.value.attempts + 1 });
+
+    void (async () => {
+      try {
+        await (report.transport ? report.transport(request) : postReport(request));
+
+        if (!destroyed) {
+          update({ sent: state.value.sent + 1, lastSuccessAt: Date.now(), lastFailure: null });
+        }
+      } catch (error) {
+        if (!destroyed) {
+          update({
+            failed: state.value.failed + 1,
+            lastFailure: error instanceof DeliveryError ? error.category : 'transport',
+          });
+        }
+      }
+    })();
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === 'hidden') {
+      flushHidden();
+    } else {
+      hiddenFlushSent = false;
+    }
+  }
+
+  function onPageShow(): void {
+    hiddenFlushSent = false;
+  }
+
+  function listenForHide(listen: boolean): void {
+    if (report?.flushOnHide === false) {
+      return;
+    }
+
+    const method = listen ? 'addEventListener' : 'removeEventListener';
+
+    if (typeof document !== 'undefined' && typeof document[method] === 'function') {
+      document[method]('visibilitychange', onVisibilityChange);
+    }
+
+    if (typeof window !== 'undefined' && typeof window[method] === 'function') {
+      window[method]('pagehide', flushHidden);
+      window[method]('pageshow', onPageShow);
+    }
+  }
+
   function stop(): void {
     if (destroyed) {
       return;
+    }
+
+    if (started) {
+      listenForHide(false);
     }
 
     started = false;
@@ -377,6 +465,8 @@ export function createReporter(
       }
 
       started = true;
+      hiddenFlushSent = false;
+      listenForHide(true);
       interval = setInterval(() => {
         if (active) {
           update({ skipped: state.value.skipped + 1 });

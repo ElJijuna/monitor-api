@@ -308,3 +308,210 @@ test('destroy inside transform prevents dispatch', async () => {
   expect(await monitor.reporter.flush()).toBe(false);
   expect(transport).not.toHaveBeenCalled();
 });
+
+describe('flushOnHide', () => {
+  const page = new EventTarget();
+  const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+
+  function setVisibility(state: 'visible' | 'hidden') {
+    doc.visibilityState = state;
+    doc.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  beforeEach(() => {
+    doc.visibilityState = 'visible';
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: page });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: doc });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window');
+    Reflect.deleteProperty(globalThis, 'document');
+  });
+
+  test('sends one keepalive report per hide and re-arms when visible again', async () => {
+    const transport = jest.fn<(request: ProductionReportRequest) => void>();
+    const monitor = reporting({ transport });
+
+    try {
+      monitor.start();
+      setVisibility('hidden');
+      page.dispatchEvent(new Event('pagehide'));
+      expect(transport).toHaveBeenCalledTimes(1);
+      expect(transport.mock.calls[0]?.[0]).toMatchObject({ keepalive: true, endpoint: '/metrics' });
+      expect(transport.mock.calls[0]?.[0].signal).toBeUndefined();
+
+      setVisibility('visible');
+      page.dispatchEvent(new Event('pagehide'));
+      expect(transport).toHaveBeenCalledTimes(2);
+
+      page.dispatchEvent(new Event('pageshow'));
+      setVisibility('hidden');
+      expect(transport).toHaveBeenCalledTimes(3);
+
+      await Promise.resolve();
+      expect(monitor.reporter.snapshot.value).toMatchObject({ attempts: 3, sent: 3 });
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('interval deliveries are not marked keepalive', async () => {
+    const transport = jest.fn<(request: ProductionReportRequest) => void>();
+    const monitor = reporting({ transport });
+
+    try {
+      monitor.start();
+      await monitor.reporter.flush();
+      expect(transport.mock.calls[0]?.[0].keepalive).toBe(false);
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('can be disabled', () => {
+    const transport = jest.fn<() => void>();
+    const monitor = reporting({ transport, flushOnHide: false });
+
+    try {
+      monitor.start();
+      setVisibility('hidden');
+      page.dispatchEvent(new Event('pagehide'));
+      expect(transport).not.toHaveBeenCalled();
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('stops listening after stop and resumes after start', () => {
+    const transport = jest.fn<() => void>();
+    const monitor = reporting({ transport });
+
+    try {
+      monitor.start();
+      monitor.stop();
+      page.dispatchEvent(new Event('pagehide'));
+      expect(transport).not.toHaveBeenCalled();
+
+      monitor.start();
+      page.dispatchEvent(new Event('pagehide'));
+      expect(transport).toHaveBeenCalledTimes(1);
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('sends even while an interval delivery is pending and survives stop', async () => {
+    let finishHidden!: () => void;
+
+    const signals: (AbortSignal | undefined)[] = [];
+    const transport = jest.fn((request: ProductionReportRequest) => {
+      signals.push(request.signal);
+
+      return new Promise<void>((resolve) => {
+        if (request.keepalive) {
+          finishHidden = resolve;
+        }
+      });
+    });
+    const monitor = reporting({ transport });
+
+    try {
+      monitor.start();
+      const pending = monitor.reporter.flush();
+
+      page.dispatchEvent(new Event('pagehide'));
+      expect(transport).toHaveBeenCalledTimes(2);
+
+      monitor.stop();
+      expect(await pending).toBe(false);
+      expect(signals[0]?.aborted).toBe(true);
+      expect(signals[1]).toBeUndefined();
+
+      finishHidden();
+      await new Promise((resolve) => realTimers.setTimeout(resolve, 0));
+      expect(monitor.reporter.snapshot.value).toMatchObject({ sent: 1, cancelled: 1 });
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('records dropped and failed hidden reports', async () => {
+    const tooLarge = reporting({ maxPayloadBytes: 1 });
+    const failing = reporting({
+      transport: async () => {
+        throw new Error('offline');
+      },
+    });
+
+    try {
+      tooLarge.start();
+      failing.start();
+      page.dispatchEvent(new Event('pagehide'));
+      await new Promise((resolve) => realTimers.setTimeout(resolve, 0));
+      expect(tooLarge.reporter.snapshot.value).toMatchObject({
+        attempts: 0,
+        dropped: 1,
+        lastFailure: 'payload-too-large',
+      });
+      expect(failing.reporter.snapshot.value).toMatchObject({
+        attempts: 1,
+        failed: 1,
+        lastFailure: 'transport',
+      });
+    } finally {
+      tooLarge.destroy();
+      failing.destroy();
+    }
+  });
+
+  test('destroy inside transform prevents the hidden dispatch', () => {
+    const transport = jest.fn<() => void>();
+    const monitor = reporting({
+      transport,
+      transform: () => {
+        monitor.destroy();
+
+        return {};
+      },
+    });
+
+    monitor.start();
+    page.dispatchEvent(new Event('pagehide'));
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  test('the default fetch transport requests keepalive', async () => {
+    const realFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    const fetchMock = jest.fn(async () => new Response(null, { status: 204 }));
+
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: fetchMock });
+    const monitor = createMonitor({
+      collectors: [],
+      env: 'production',
+      report: { endpoint: '/metrics', interval: 1000, headers: { Authorization: 'Bearer x' } },
+    });
+
+    try {
+      monitor.start();
+      page.dispatchEvent(new Event('pagehide'));
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/metrics',
+        expect.objectContaining({
+          method: 'POST',
+          keepalive: true,
+          signal: null,
+          headers: expect.objectContaining({ Authorization: 'Bearer x' }),
+        }),
+      );
+      await new Promise((resolve) => realTimers.setTimeout(resolve, 0));
+      expect(monitor.reporter.snapshot.value.sent).toBe(1);
+    } finally {
+      monitor.destroy();
+
+      if (realFetch) {
+        Object.defineProperty(globalThis, 'fetch', realFetch);
+      }
+    }
+  });
+});

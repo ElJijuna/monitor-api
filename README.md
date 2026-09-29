@@ -609,7 +609,7 @@ setup are contained as well. The reporter keeps at most one delivery in flight
 and skips interval ticks while it is pending, so each attempt times out after
 `interval` (at most 30 seconds) unless `timeout` says otherwise. Authentication can be supplied
 through `headers`. A custom `transport({ endpoint, payload, body, headers,
-signal })` can replace `fetch`; without either transport, the reporter does not
+keepalive, signal })` can replace `fetch`; without either transport, the reporter does not
 start.
 
 Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
@@ -620,6 +620,17 @@ does not send request URLs, error messages or stacks, histories, event labels or
 data, component names, Web Vital IDs, or navigation types. The reporter endpoint
 is also excluded from NetworkCollector, while any configured network filter
 continues to apply.
+
+When the page is hidden or unloaded (`visibilitychange` to `hidden`, or
+`pagehide`), the reporter sends one final report so data captured since the
+last interval is not lost. That report is fire-and-forget: a single attempt with
+no timeout or retries, not cancelled by `stop()`, and sent even while an
+interval delivery is still pending. The default transport posts it with
+`fetch(..., { keepalive: true })`, which keeps authentication `headers` and is
+limited by browsers to about 64 KiB in flight. Custom transports receive
+`keepalive: true` on that request and should use a mechanism that outlives the
+page, such as `fetch` with `keepalive` or `navigator.sendBeacon`. Set
+`flushOnHide: false` to disable it.
 
 `monitor.reporter.snapshot` exposes delivery diagnostics such as `sent`,
 `failed`, `dropped`, `retries`, `cancelled`, `skipped`, and `lastFailure`.
