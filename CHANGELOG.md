@@ -1,3 +1,15 @@
+# [1.8.0](https://github.com/ElJijuna/monitor-api/compare/v1.7.1...v1.8.0) (2026-09-29)
+
+
+### Features
+
+* add DeviceCollector to monitor logical processor count and update related documentation and tests ([29f0677](https://github.com/ElJijuna/monitor-api/commit/29f0677bca63121cad48ef203c0e40f731ea4ff1))
+* add memory measurement support using performance.measureUserAgentSpecificMemory() in cross-origin isolated pages, update related documentation and tests ([12a1b4f](https://github.com/ElJijuna/monitor-api/commit/12a1b4f5ae3b9c6bb281eef279942cabee185047))
+* enhance DeviceCollector to track online status and offline transitions, update related documentation and tests ([990094b](https://github.com/ElJijuna/monitor-api/commit/990094b402b599612b5e8c3b918e0d6578d63308))
+* enhance memory measurement to include per-frame and per-worker context details, update related tests and documentation ([980af10](https://github.com/ElJijuna/monitor-api/commit/980af10d1cc409f3b0fd2d91040f46acc3fe8d5c))
+* enhance performance monitoring by adding freeze/resume event handling and updating tests ([e8b374a](https://github.com/ElJijuna/monitor-api/commit/e8b374a6f72c3ffbe030616e0ea8afce3a73882c))
+* pause memory sampling when the document is hidden and update tests ([0d6ecd4](https://github.com/ElJijuna/monitor-api/commit/0d6ecd49dabdb3c2910450915c06010f50e7890c))
+
 ## [1.7.1](https://github.com/ElJijuna/monitor-api/compare/v1.7.0...v1.7.1) (2026-09-29)
 
 
