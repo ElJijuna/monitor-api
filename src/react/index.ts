@@ -1,4 +1,7 @@
 export {
+  type EqualityFn,
+  type SnapshotHook,
+  shallowEqual,
   useErrors,
   useEvents,
   useMonitor,

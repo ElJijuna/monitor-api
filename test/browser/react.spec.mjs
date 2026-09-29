@@ -11,9 +11,9 @@ const versions = {
   'React 19': { react: `${react19}react`, 'react-dom': `${react19}react-dom` },
 };
 
-async function bundle(alias) {
+async function bundle(alias, entry = './fixtures/react-app.mjs') {
   const result = await build({
-    entryPoints: [fixture('./fixtures/react-app.mjs')],
+    entryPoints: [fixture(entry)],
     bundle: true,
     format: 'esm',
     write: false,
@@ -66,5 +66,46 @@ for (const [name, alias] of Object.entries(versions)) {
     // App's own mount time excludes the ~8 ms spent in Heavy.
     expect(mounts.Heavy).toBeGreaterThanOrEqual(7);
     expect(mounts.App).toBeLessThan(mounts.Heavy);
+  });
+}
+
+for (const [name, alias] of Object.entries(versions)) {
+  test(`${name}: selector hooks commit only when the selection changes`, async ({ page }) => {
+    const script = await bundle(alias, './fixtures/react-hooks-app.mjs');
+
+    await page.route('http://react.test/**', (route) =>
+      route.request().url().endsWith('/app.js')
+        ? route.fulfill({ contentType: 'text/javascript', body: script })
+        : route.fulfill({
+            contentType: 'text/html',
+            body: '<div id="root"></div><script type="module" src="/app.js"></script>',
+          }),
+    );
+    await page.goto('http://react.test/');
+    await expect(page.locator('#saves')).toHaveText('0');
+
+    const commits = () => page.evaluate(() => ({ ...window.hooksTest.commits }));
+    const initial = await commits();
+
+    await page.evaluate(() => window.hooksTest.emit('open'));
+    await expect(page.locator('#full')).toHaveText('1');
+    await page.evaluate(() => window.hooksTest.emit('open'));
+    await expect(page.locator('#full')).toHaveText('2');
+
+    // Unrelated events re-render the full-snapshot component only; the summary changes once.
+    expect(await commits()).toEqual({
+      full: initial.full + 2,
+      count: initial.count,
+      object: initial.object + 1,
+    });
+
+    await page.evaluate(() => window.hooksTest.emit('save'));
+    await expect(page.locator('#saves')).toHaveText('1');
+    await expect(page.locator('#summary')).toHaveText('1/true');
+    expect(await commits()).toEqual({
+      full: initial.full + 3,
+      count: initial.count + 1,
+      object: initial.object + 2,
+    });
   });
 }

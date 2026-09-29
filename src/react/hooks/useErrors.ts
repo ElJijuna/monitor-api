@@ -1,7 +1,8 @@
-import type { ErrorSnapshot, Monitor } from '../../core/types';
-import { useSignal } from './useSignal';
+import type { ErrorSnapshot } from '../../core/types';
+import { snapshotHook } from './snapshotHook';
 
-/** Returns the optional error snapshot and re-renders when captured errors change. */
-export function useErrors(monitor: Monitor): ErrorSnapshot {
-  return useSignal(monitor.errors.snapshot);
-}
+/**
+ * Returns the optional error snapshot and re-renders when captured errors change.
+ * Pass a selector to re-render only when the selected part changes.
+ */
+export const useErrors = snapshotHook<ErrorSnapshot>((monitor) => monitor.errors.snapshot);

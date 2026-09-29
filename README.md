@@ -16,7 +16,7 @@ Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, 
 - **Signal-based** — subscribe to exactly what you need, no polling
 - **7 collectors** — Performance, Network, React, Events, Web Vitals, optional Errors and Resources
 - **Web Vitals** — CLS, FCP, INP, LCP, and TTFB via `web-vitals`
-- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useResources`, `useWebVitals`
+- **React integration** — selector-aware `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useResources`, `useWebVitals`
 - **Zero config** — works out of the box, tree-shakeable
 - **SSR safe** — browser collectors no-op outside the browser
 - **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
@@ -669,6 +669,46 @@ function ErrorPanel() {
   )
 }
 ```
+
+### Selecting part of a snapshot
+
+Collector hooks re-render on every change to their snapshot: `usePerformance`
+updates once per second for FPS, and `useMonitor` updates whenever any collector
+does. Pass a selector to subscribe to just what the component shows. It then
+re-renders only when the selected value changes, compared with `Object.is`:
+
+```tsx
+import { shallowEqual, useMonitor, useNetwork, usePerformance, useSignal } from 'monitor-api/react'
+
+function FpsBadge() {
+  const fps = usePerformance(monitor, (snap) => snap.fps)
+  return <span>{fps} FPS</span>
+}
+
+function LcpBadge() {
+  // Ignores FPS ticks, requests, renders, and every other collector update.
+  const lcp = useMonitor(monitor, (snap) => snap.webVitals.lcp?.value ?? null)
+  return <span>LCP: {lcp ?? 'n/a'}</span>
+}
+
+function NetworkHealth() {
+  // A selector that builds an object needs shallowEqual, or it would re-render every time.
+  const { count, errorRate } = useNetwork(
+    monitor,
+    (snap) => ({ count: snap.window5s.count, errorRate: snap.window5s.errorRate }),
+    shallowEqual,
+  )
+  return <span>{count} requests, {(errorRate * 100).toFixed(0)}% errors</span>
+}
+
+// The same selector and equality arguments work on any signal.
+const slowCount = useSignal(monitor.react.snapshot, (snap) => snap.slowComponents.length)
+```
+
+Selectors can be inline functions; an equal selection keeps its previous
+reference across renders. The third argument accepts any
+`(previous, next) => boolean` comparison, and `shallowEqual` compares objects
+and arrays one level deep.
 
 ---
 
