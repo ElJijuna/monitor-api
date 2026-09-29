@@ -25,19 +25,29 @@ import type {
   NetworkCollectorConfig,
   PerformanceCollectorConfig,
   ReactCollectorConfig,
+  WebVitalAttributionMap,
+  WebVitalMetric,
+  WebVitalName,
   WebVitalsCollectorConfig,
 } from './types';
 
-function createDefaultReportPayload(snap: MonitorSnapshot) {
-  const summarizeWebVital = (metric: MonitorSnapshot['webVitals']['cls']) =>
-    metric
-      ? {
-          value: metric.value,
-          delta: metric.delta,
-          rating: metric.rating,
-        }
-      : null;
+function summarizeWebVital<N extends WebVitalName>(
+  metric: WebVitalMetric<N> | null,
+  safeAttribution: (attribution: WebVitalAttributionMap[N]) => object,
+) {
+  if (!metric) {
+    return null;
+  }
 
+  return {
+    value: metric.value,
+    delta: metric.delta,
+    rating: metric.rating,
+    ...(metric.attribution ? { attribution: safeAttribution(metric.attribution) } : {}),
+  };
+}
+
+function createDefaultReportPayload(snap: MonitorSnapshot) {
   return {
     timestamp: snap.timestamp,
     performance: {
@@ -62,12 +72,47 @@ function createDefaultReportPayload(snap: MonitorSnapshot) {
       droppedErrors: snap.errors.droppedErrors,
       retainedErrors: snap.errors.entries.length,
     },
+    // Attribution keeps timings and categories only: selectors, URLs, and invokers stay local.
     webVitals: {
-      cls: summarizeWebVital(snap.webVitals.cls),
-      fcp: summarizeWebVital(snap.webVitals.fcp),
-      inp: summarizeWebVital(snap.webVitals.inp),
-      lcp: summarizeWebVital(snap.webVitals.lcp),
-      ttfb: summarizeWebVital(snap.webVitals.ttfb),
+      cls: summarizeWebVital(snap.webVitals.cls, (a) => ({
+        largestShiftValue: a.largestShiftValue,
+        largestShiftTime: a.largestShiftTime,
+        loadState: a.loadState,
+      })),
+      fcp: summarizeWebVital(snap.webVitals.fcp, (a) => ({
+        timeToFirstByte: a.timeToFirstByte,
+        firstByteToFCP: a.firstByteToFCP,
+        loadState: a.loadState,
+      })),
+      inp: summarizeWebVital(snap.webVitals.inp, (a) => ({
+        interactionType: a.interactionType,
+        inputDelay: a.inputDelay,
+        processingDuration: a.processingDuration,
+        presentationDelay: a.presentationDelay,
+        loadState: a.loadState,
+        longestScript: a.longestScript && {
+          invokerType: a.longestScript.invokerType,
+          subpart: a.longestScript.subpart,
+          intersectingDuration: a.longestScript.intersectingDuration,
+        },
+        totalScriptDuration: a.totalScriptDuration,
+        totalStyleAndLayoutDuration: a.totalStyleAndLayoutDuration,
+        totalPaintDuration: a.totalPaintDuration,
+        totalUnattributedDuration: a.totalUnattributedDuration,
+      })),
+      lcp: summarizeWebVital(snap.webVitals.lcp, (a) => ({
+        timeToFirstByte: a.timeToFirstByte,
+        resourceLoadDelay: a.resourceLoadDelay,
+        resourceLoadDuration: a.resourceLoadDuration,
+        elementRenderDelay: a.elementRenderDelay,
+      })),
+      ttfb: summarizeWebVital(snap.webVitals.ttfb, (a) => ({
+        waitingDuration: a.waitingDuration,
+        cacheDuration: a.cacheDuration,
+        dnsDuration: a.dnsDuration,
+        connectionDuration: a.connectionDuration,
+        requestDuration: a.requestDuration,
+      })),
     },
   };
 }

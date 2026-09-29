@@ -24,7 +24,13 @@ function log(message) {
 }
 
 const monitor = createMonitor({
-  collectors: ['performance', 'network', 'events', 'errors', 'webVitals'],
+  collectors: {
+    performance: true,
+    network: true,
+    events: true,
+    errors: true,
+    webVitals: { attribution: true },
+  },
   env: 'production',
   maxHistory: 40,
   report: {

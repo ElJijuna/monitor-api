@@ -121,7 +121,7 @@ apps.
 - Collection starts only after `monitor.start()`.
 - `monitor.stop()` and `monitor.destroy()` restore patched browser APIs.
 - Multiple monitor instances share network and React global hooks; the last active instance restores them.
-- Multiple monitor instances with the same `reportAllChanges` setting share Web Vitals observers.
+- Multiple monitor instances with the same `reportAllChanges` and `attribution` settings share Web Vitals observers.
 - Histories are bounded by `maxHistory`.
 - Custom event payloads are copied before retention and bounded by depth and UTF-8 byte size.
 - Error collection is opt-in. Default reporting sends only error counts, not messages or stacks.
@@ -415,10 +415,44 @@ interface WebVitalMetric {
   id: string
   navigationType: string
   timestamp: number
+  attribution?: ... // only with `attribution: true`, see below
 }
 ```
 
 `CLS` is unitless. `FCP`, `INP`, `LCP`, and `TTFB` are reported in milliseconds.
+
+**Attribution (diagnostics).** Set `attribution: true` to learn *why* a metric
+has its value: which element was the LCP, which interaction caused INP, which
+element shifted most for CLS, and how each metric splits into phases.
+
+```ts
+const monitor = createMonitor({
+  collectors: { webVitals: { attribution: true } },
+})
+
+monitor.webVitals.snapshot.subscribe(({ lcp, inp }) => {
+  console.log('LCP element:', lcp?.attribution?.target)          // 'main > img.hero'
+  console.log('LCP render delay:', lcp?.attribution?.elementRenderDelay)
+  console.log('INP target:', inp?.attribution?.interactionTarget) // 'button#save'
+  console.log('INP longest script:', inp?.attribution?.longestScript?.invoker)
+})
+```
+
+| Metric | Attribution fields |
+| --- | --- |
+| `LCP` | `target`, `url`, `timeToFirstByte`, `resourceLoadDelay`, `resourceLoadDuration`, `elementRenderDelay` |
+| `INP` | `interactionTarget`, `interactionType`, `interactionTime`, `inputDelay`, `processingDuration`, `presentationDelay`, `loadState`, `longestScript`, and script/style/paint totals |
+| `CLS` | `largestShiftTarget`, `largestShiftTime`, `largestShiftValue`, `loadState` |
+| `FCP` | `timeToFirstByte`, `firstByteToFCP`, `loadState` |
+| `TTFB` | `waitingDuration`, `cacheDuration`, `dnsDuration`, `connectionDuration`, `requestDuration` |
+
+The larger `web-vitals/attribution` build is loaded with a dynamic `import()`
+only when a monitor enables the option, so bundles without it do not grow. The
+snapshot keeps a serializable summary: selectors, URLs, and invokers are capped
+at 500 characters, and performance entries and DOM nodes are never retained.
+The default production report includes only the timings and categories; see
+[PRIVACY.md](PRIVACY.md). `longestScript` requires Long Animation Frame support
+(Chromium), and fields the browser cannot provide are `null`.
 
 ---
 
@@ -684,7 +718,10 @@ createMonitor({
       dedupWindow: 1000,            // default 1000ms
       sanitize: (details) => details,
     },
-    webVitals: { reportAllChanges: true },
+    webVitals: {
+      reportAllChanges: true,  // default true
+      attribution: false,      // default false; diagnostic breakdown per metric
+    },
   },
 
   maxHistory: 60,   // data points per metric

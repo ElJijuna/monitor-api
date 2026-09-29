@@ -3,10 +3,91 @@ import type SSignal from 'ssignal';
 /** Supported Web Vitals metric names. */
 export type WebVitalName = 'CLS' | 'FCP' | 'INP' | 'LCP' | 'TTFB';
 
+/** Page load state when a metric's attributed event happened. */
+export type WebVitalLoadState = 'loading' | 'dom-interactive' | 'dom-content-loaded' | 'complete';
+
+/** Why LCP took as long as it did. Times are milliseconds; the four parts add up to the value. */
+export interface LCPAttributionSummary {
+  /** CSS selector of the LCP element, or null when unknown. */
+  target: string | null;
+  /** URL of the LCP image or video, or null for text. */
+  url: string | null;
+  timeToFirstByte: number;
+  resourceLoadDelay: number;
+  resourceLoadDuration: number;
+  elementRenderDelay: number;
+}
+
+/** The script that contributed most to the INP interaction, from Long Animation Frames. */
+export interface INPLongestScript {
+  /** Script URL, or null for inline or unknown sources. */
+  url: string | null;
+  /** What invoked the script, for example `BUTTON#save.onclick`. */
+  invoker: string | null;
+  invokerType: string | null;
+  /** INP phase the script overlapped with most. */
+  subpart: 'input-delay' | 'processing-duration' | 'presentation-delay';
+  /** Milliseconds of the script that overlap that phase. */
+  intersectingDuration: number;
+}
+
+/** Which interaction caused INP and where its time went. Times are milliseconds. */
+export interface INPAttributionSummary {
+  /** CSS selector of the element the user interacted with, or null when unknown. */
+  interactionTarget: string | null;
+  interactionType: 'pointer' | 'keyboard' | null;
+  /** `performance.now()` time of the interaction, or null when unknown. */
+  interactionTime: number | null;
+  inputDelay: number;
+  processingDuration: number;
+  presentationDelay: number;
+  loadState: WebVitalLoadState | null;
+  /** Null when Long Animation Frame timing is unsupported or found no script. */
+  longestScript: INPLongestScript | null;
+  totalScriptDuration: number | null;
+  totalStyleAndLayoutDuration: number | null;
+  totalPaintDuration: number | null;
+  totalUnattributedDuration: number | null;
+}
+
+/** The largest layout shift in the CLS session. */
+export interface CLSAttributionSummary {
+  /** CSS selector of the element that shifted most, or null when unknown. */
+  largestShiftTarget: string | null;
+  largestShiftTime: number | null;
+  largestShiftValue: number | null;
+  loadState: WebVitalLoadState | null;
+}
+
+/** Split of FCP into server and client time, in milliseconds. */
+export interface FCPAttributionSummary {
+  timeToFirstByte: number;
+  firstByteToFCP: number;
+  loadState: WebVitalLoadState | null;
+}
+
+/** Phases of TTFB, in milliseconds. */
+export interface TTFBAttributionSummary {
+  waitingDuration: number;
+  cacheDuration: number;
+  dnsDuration: number;
+  connectionDuration: number;
+  requestDuration: number;
+}
+
+/** Attribution summary type for each metric name. */
+export interface WebVitalAttributionMap {
+  CLS: CLSAttributionSummary;
+  FCP: FCPAttributionSummary;
+  INP: INPAttributionSummary;
+  LCP: LCPAttributionSummary;
+  TTFB: TTFBAttributionSummary;
+}
+
 /** Serializable Web Vitals metric captured from the `web-vitals` package. */
-export interface WebVitalMetric {
+export interface WebVitalMetric<N extends WebVitalName = WebVitalName> {
   /** Metric name. */
-  name: WebVitalName;
+  name: N;
   /** Current metric value. Units depend on the metric: CLS is unitless, others are milliseconds. */
   value: number;
   /** Delta from the previous report for the same metric instance. */
@@ -19,20 +100,25 @@ export interface WebVitalMetric {
   navigationType: string;
   /** Unix timestamp in milliseconds for when the metric was recorded. */
   timestamp: number;
+  /**
+   * Diagnostic breakdown, present only when the collector's `attribution` option is enabled.
+   * Selectors and URLs can reveal page structure or user data; see PRIVACY.md.
+   */
+  attribution?: WebVitalAttributionMap[N];
 }
 
 /** Latest Web Vitals values and retained metric reports. */
 export interface WebVitalsSnapshot {
   /** Latest Cumulative Layout Shift metric. */
-  cls: WebVitalMetric | null;
+  cls: WebVitalMetric<'CLS'> | null;
   /** Latest First Contentful Paint metric. */
-  fcp: WebVitalMetric | null;
+  fcp: WebVitalMetric<'FCP'> | null;
   /** Latest Interaction to Next Paint metric. */
-  inp: WebVitalMetric | null;
+  inp: WebVitalMetric<'INP'> | null;
   /** Latest Largest Contentful Paint metric. */
-  lcp: WebVitalMetric | null;
+  lcp: WebVitalMetric<'LCP'> | null;
   /** Latest Time to First Byte metric. */
-  ttfb: WebVitalMetric | null;
+  ttfb: WebVitalMetric<'TTFB'> | null;
   /** Recent metric reports, capped by `maxHistory`. */
   entries: WebVitalMetric[];
 }
@@ -43,6 +129,11 @@ export interface WebVitalsCollectorConfig {
   maxHistory: number;
   /** Whether to report metric updates as values change. Defaults to true. */
   reportAllChanges: boolean;
+  /**
+   * Adds a diagnostic breakdown to each metric, such as the LCP element or the interaction that
+   * caused INP. Loads the larger `web-vitals/attribution` build on demand. Defaults to false.
+   */
+  attribution?: boolean;
 }
 
 /** Public API exposed by the Web Vitals collector. */

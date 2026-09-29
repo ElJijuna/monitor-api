@@ -2,6 +2,8 @@ export { emitMonitorEvent } from './collectors/EventCollector';
 export { createMonitor } from './core/createMonitor';
 
 export type {
+  // Web Vitals
+  CLSAttributionSummary,
   CollectorName,
   ComponentStats,
   ErrorCollectorConfig,
@@ -9,14 +11,18 @@ export type {
   EventCollectorConfig,
   // Events
   EventSnapshot,
+  FCPAttributionSummary,
   IErrorCollector,
   IEventCollector,
   INetworkCollector,
+  INPAttributionSummary,
+  INPLongestScript,
   // Collector interfaces
   IPerformanceCollector,
   IReactCollector,
   IReporter,
   IWebVitalsCollector,
+  LCPAttributionSummary,
   LongTaskInfo,
   MemoryInfo,
   // Core
@@ -46,8 +52,10 @@ export type {
   RenderPhase,
   ReporterSnapshot,
   ReportFailure,
+  TTFBAttributionSummary,
+  WebVitalAttributionMap,
+  WebVitalLoadState,
   WebVitalMetric,
-  // Web Vitals
   WebVitalName,
   WebVitalsCollectorConfig,
   WebVitalsSnapshot,

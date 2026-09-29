@@ -9,6 +9,7 @@ three browser engines through Playwright on every pull request.
 | Fetch and XHR instrumentation | Tested | Tested | Tested | Missing APIs are skipped |
 | Error and rejection capture | Tested | Tested | Tested | Missing browser globals are skipped |
 | Web Vitals | Tested | Tested | Tested | Unsupported metrics remain `null` |
+| Web Vitals attribution | Tested | Feature detected | Feature detected | Fields the engine cannot measure are `null` |
 | FPS | Tested | Tested | Tested | Requires `requestAnimationFrame` |
 | JS heap memory | Supported | `null` | `null` | Chromium-only `performance.memory` |
 | Long Tasks | Feature detected | Feature detected | Feature detected | Empty aggregate when unsupported |
