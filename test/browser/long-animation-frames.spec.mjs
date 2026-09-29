@@ -5,16 +5,7 @@ test('Long Animation Frames attribute a blocking click handler', async ({ page, 
 
   await page.goto('/');
   await expect(page.locator('#status-text')).toHaveText('running');
-  await page.evaluate(() => {
-    document.querySelector('#event-button').addEventListener('click', function blockMainThread() {
-      const end = performance.now() + 150;
-
-      while (performance.now() < end) {
-        // Busy-wait so the frame that handles the click becomes a long animation frame.
-      }
-    });
-  });
-  await page.locator('#event-button').click();
+  await page.locator('#block-button').click();
 
   await expect
     .poll(() =>
@@ -32,12 +23,17 @@ test('Long Animation Frames attribute a blocking click handler', async ({ page, 
   expect(info.totalBlockingDuration).toBeGreaterThan(0);
   expect(info.maxBlockingDuration).toBeGreaterThanOrEqual(100);
   expect(blocked).toBeDefined();
-  expect(blocked.duration).toBeGreaterThanOrEqual(150);
+  expect(blocked.duration).toBeGreaterThanOrEqual(200);
   expect(blocked.timestamp).toBeGreaterThan(Date.now() - 60_000);
 
   const [longest] = blocked.scripts;
 
   expect(longest.invokerType).toBe('event-listener');
-  expect(longest.invoker).toContain('click');
-  expect(longest.duration).toBeGreaterThanOrEqual(140);
+  expect(longest.invoker).toContain('#block-button');
+  expect(longest.duration).toBeGreaterThanOrEqual(190);
+
+  // The demo shows the frame and names the handler in its activity log.
+  await expect(page.locator('#loaf-count')).not.toHaveText('0');
+  await expect(page.locator('#loaf-detail')).toContainText('Worst blocked input for');
+  await expect(page.locator('#activity')).toContainText('#block-button');
 });

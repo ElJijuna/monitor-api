@@ -54,6 +54,21 @@
           <span>CLS</span>
           <strong id="cls">0</strong>
         </article>
+        <article class="metric">
+          <span>Long frames</span>
+          <strong id="loaf-count">0</strong>
+          <small id="loaf-detail">No blocking frames yet</small>
+        </article>
+        <article class="metric">
+          <span>LCP</span>
+          <strong id="lcp">–</strong>
+          <small id="lcp-detail">Waiting for the first paint</small>
+        </article>
+        <article class="metric">
+          <span>Page views</span>
+          <strong id="page-views">1</strong>
+          <small id="page-view-detail">Initial load</small>
+        </article>
       </section>
 
       <section class="controls" aria-label="Actions">
@@ -62,6 +77,16 @@
         <button id="xhr-button" type="button">Run XHR</button>
         <button id="error-button" type="button">Capture error</button>
         <button id="flush-button" type="button">Flush report</button>
+        <button id="block-button" type="button">Block main thread</button>
+        <button id="soft-nav-button" type="button">Soft navigate</button>
+      </section>
+
+      <section class="panel view" aria-live="polite">
+        <h2 id="view-title">Home</h2>
+        <p id="view-body">
+          Soft navigate changes the URL and paints a new view without a page load. Chromium 151+
+          reports Web Vitals for each of these page views.
+        </p>
       </section>
 
       <section class="panel">

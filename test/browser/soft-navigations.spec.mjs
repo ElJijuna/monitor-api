@@ -5,58 +5,34 @@ test('Web Vitals are reported per soft navigation', async ({ browserName, page }
 
   await page.goto('/');
   await expect(page.locator('#status-text')).toHaveText('running');
-  await page.evaluate(async () => {
-    const { createMonitor } = await import('/dist/index.js');
-    const monitor = createMonitor({
-      collectors: { webVitals: { softNavigations: true, reportAllChanges: true } },
-    });
-
-    monitor.start();
-    window.softNavMonitor = monitor;
-
-    // An SPA-style route change: a click that updates the URL and paints new content.
-    const link = document.createElement('a');
-
-    link.id = 'soft-nav-link';
-    link.href = '/cart';
-    link.textContent = 'Go to cart';
-    link.addEventListener('click', (event) => {
-      event.preventDefault();
-      history.pushState({}, '', '/cart');
-
-      const view = document.createElement('main');
-
-      view.innerHTML = '<h1>Cart</h1><p>Three items, ready to check out.</p>';
-      document.body.replaceChildren(view);
-    });
-    document.body.append(link);
-  });
-
-  await page.locator('#soft-nav-link').click();
+  await page.locator('#soft-nav-button').click();
 
   await expect
     .poll(
       () =>
         page.evaluate(
           () =>
-            window.softNavMonitor.webVitals.snapshot.value.entries.filter(
-              (entry) => entry.navigationType === 'soft-navigation',
-            ).length,
+            window.monitorDemo
+              .snapshot()
+              .webVitals.entries.filter((entry) => entry.navigationType === 'soft-navigation')
+              .length,
         ),
       { timeout: 10_000 },
     )
     .toBeGreaterThan(0);
 
-  const { entries, lcp } = await page.evaluate(
-    () => window.softNavMonitor.webVitals.snapshot.value,
-  );
+  const { entries, lcp } = await page.evaluate(() => window.monitorDemo.snapshot().webVitals);
   const hard = entries.filter((entry) => entry.navigationType !== 'soft-navigation');
   const soft = entries.filter((entry) => entry.navigationType === 'soft-navigation');
-  const pathOf = (entry) => new URL(entry.navigationURL).pathname;
+  const routeOf = (entry) => {
+    const url = new URL(entry.navigationURL);
+
+    return url.pathname + url.search;
+  };
 
   expect(hard.length).toBeGreaterThan(0);
-  expect(hard.every((entry) => pathOf(entry) === '/')).toBe(true);
-  expect(soft.every((entry) => pathOf(entry) === '/cart')).toBe(true);
+  expect(hard.every((entry) => routeOf(entry) === '/')).toBe(true);
+  expect(soft.every((entry) => routeOf(entry) === '/?view=orders')).toBe(true);
   expect(new Set(soft.map((entry) => entry.navigationId)).size).toBe(1);
   expect(soft[0].navigationId).toBeGreaterThan(
     Math.max(...hard.map((entry) => entry.navigationId)),
@@ -66,4 +42,9 @@ test('Web Vitals are reported per soft navigation', async ({ browserName, page }
     navigationType: 'soft-navigation',
     navigationId: soft[0].navigationId,
   });
+
+  // The demo counts the page views and shows which one the LCP belongs to.
+  await expect(page.locator('#page-views')).toHaveText('2');
+  await expect(page.locator('#page-view-detail')).toHaveText('1 soft navigation');
+  await expect(page.locator('#lcp-detail')).toHaveText('/?view=orders · soft-navigation');
 });

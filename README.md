@@ -932,7 +932,7 @@ npm run docs:build
 npm run bench
 ```
 
-- `demo` builds the package and serves the live browser demo at `http://127.0.0.1:4177`.
+- `demo` builds the package and serves the live browser demo at `http://127.0.0.1:4177`. Besides network, events, errors and reporting, it has buttons to block the main thread (a long animation frame attributed to the click handler) and to soft navigate between views (Web Vitals per page view in Chromium 151+).
 - `test:browser` builds the package and runs the Playwright demo smoke test in Chromium, Firefox, and WebKit.
 - The supported feature matrix and fallbacks are documented in [COMPATIBILITY.md](COMPATIBILITY.md).
 - `docs:build` generates TypeDoc HTML in `docs/`.

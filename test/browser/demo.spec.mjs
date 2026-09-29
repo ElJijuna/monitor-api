@@ -53,3 +53,22 @@ test('demo captures browser activity through the built package', async ({ page }
     }),
   );
 });
+
+test('soft navigate updates the URL and view, which survive a reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#status-text')).toHaveText('running');
+  await expect(page.locator('#view-title')).toHaveText('Home');
+
+  await page.locator('#soft-nav-button').click();
+  await expect(page).toHaveURL(/\/\?view=orders$/);
+  await expect(page.locator('#view-title')).toHaveText('Orders');
+
+  await page.locator('#soft-nav-button').click();
+  await expect(page.locator('#view-title')).toHaveText('Customers');
+
+  await page.goBack();
+  await expect(page.locator('#view-title')).toHaveText('Orders');
+
+  await page.reload();
+  await expect(page.locator('#view-title')).toHaveText('Orders');
+});

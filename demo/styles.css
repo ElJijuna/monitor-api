@@ -122,6 +122,18 @@ h2 {
   line-height: 1;
 }
 
+.metric small {
+  color: #63708a;
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.view p {
+  color: #3d475d;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;
