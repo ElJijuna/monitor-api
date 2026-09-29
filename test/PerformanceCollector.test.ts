@@ -684,3 +684,112 @@ describe('long animation frames', () => {
     }
   });
 });
+
+describe('paired updates', () => {
+  test('an FPS tick notifies once, with the value and its history together', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+      const seen: Array<{ fps: number; fpsHistory: number[] }> = [];
+      const combined = jest.fn();
+
+      monitor.start();
+      monitor.performance.snapshot.subscribe(({ fps, fpsHistory }) => {
+        seen.push({ fps, fpsHistory });
+      });
+      monitor.subscribe(combined);
+      combined.mockClear();
+
+      browser.frames[browser.frames.length - 1]?.(1_000);
+      browser.frames[browser.frames.length - 1]?.(2_000);
+
+      expect(seen).toEqual([{ fps: 1, fpsHistory: [1] }]);
+      expect(combined).toHaveBeenCalledTimes(1);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('a memory tick notifies once, with the reading and its history together', () => {
+    const browser = installPerformanceBrowser();
+
+    Object.defineProperty(globalThis.performance, 'memory', {
+      configurable: true,
+      value: {
+        usedJSHeapSize: 10 * 1_048_576,
+        totalJSHeapSize: 20 * 1_048_576,
+        jsHeapSizeLimit: 50 * 1_048_576,
+      },
+    });
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+      const seen: Array<{ percent: number | undefined; memoryHistory: number[] }> = [];
+
+      monitor.start();
+      monitor.performance.snapshot.subscribe(({ memory, memoryHistory }) => {
+        seen.push({ percent: memory?.percent, memoryHistory });
+      });
+
+      // The reading equals the initial one, so only the history changes on the first tick.
+      jest.advanceTimersByTime(2_000);
+      Object.defineProperty(globalThis.performance, 'memory', {
+        configurable: true,
+        value: {
+          usedJSHeapSize: 25 * 1_048_576,
+          totalJSHeapSize: 30 * 1_048_576,
+          jsHeapSizeLimit: 50 * 1_048_576,
+        },
+      });
+      jest.advanceTimersByTime(2_000);
+
+      expect(seen).toEqual([
+        { percent: 20, memoryHistory: [20] },
+        { percent: 50, memoryHistory: [20, 50] },
+      ]);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('clearHistory notifies once', () => {
+    const browser = installPerformanceBrowser();
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+      const notify = jest.fn();
+
+      monitor.start();
+      browser.frames[browser.frames.length - 1]?.(1_000);
+      browser.frames[browser.frames.length - 1]?.(2_000);
+      browser.emit('long-animation-frame', [
+        {
+          entryType: 'long-animation-frame',
+          name: 'long-animation-frame',
+          startTime: 1,
+          duration: 60,
+        },
+      ]);
+      monitor.performance.snapshot.subscribe(notify);
+      monitor.performance.clearHistory();
+
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          fpsHistory: [],
+          memoryHistory: [],
+          longAnimationFrames: expect.objectContaining({ entries: [] }),
+        }),
+      );
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+});

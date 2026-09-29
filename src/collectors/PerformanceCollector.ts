@@ -1,5 +1,6 @@
-import SSignal, { type ComputedSignal, computed } from 'ssignal';
+import SSignal, { batch, type ComputedSignal, computed } from 'ssignal';
 import { appendHistory, validateMaxHistory } from '../core/retainHistory';
+import { shallowEqual } from '../core/shallowEqual';
 import type {
   IPerformanceCollector,
   LongAnimationFrameEntry,
@@ -150,6 +151,9 @@ export class PerformanceCollector implements IPerformanceCollector {
         longAnimationFrames,
         cls,
       }),
+      // A batch of several sources recomputes once per source; the later, identical snapshots
+      // must not notify again.
+      { equals: shallowEqual },
     );
   }
 
@@ -216,9 +220,15 @@ export class PerformanceCollector implements IPerformanceCollector {
   }
 
   clearHistory(): void {
-    this.fpsHistory.value = [];
-    this.memoryHistory.value = [];
-    this.longAnimationFrames.value = (prev: LongAnimationFrameInfo) => ({ ...prev, entries: [] });
+    // One snapshot notification for all three histories.
+    batch(() => {
+      this.fpsHistory.value = [];
+      this.memoryHistory.value = [];
+      this.longAnimationFrames.value = (prev: LongAnimationFrameInfo) => ({
+        ...prev,
+        entries: [],
+      });
+    });
   }
 
   #startFps(): void {
@@ -256,9 +266,12 @@ export class PerformanceCollector implements IPerformanceCollector {
 
         this.#lastFpsTime = time;
         this.#frameCount = 0;
-        this.fps.value = fps;
-        this.fpsHistory.value = (prev: number[]) =>
-          appendHistory(prev, [fps], this.config.maxHistory);
+        // Both are snapshot sources: batching notifies once, never with a stale history.
+        batch(() => {
+          this.fps.value = fps;
+          this.fpsHistory.value = (prev: number[]) =>
+            appendHistory(prev, [fps], this.config.maxHistory);
+        });
       }
 
       if (this.#started && generation === this.#generation) {
@@ -282,12 +295,14 @@ export class PerformanceCollector implements IPerformanceCollector {
 
       const mem = this.#readMemory();
 
-      this.memory.value = mem;
+      batch(() => {
+        this.memory.value = mem;
 
-      if (mem !== null) {
-        this.memoryHistory.value = (prev: number[]) =>
-          appendHistory(prev, [mem.percent], this.config.maxHistory);
-      }
+        if (mem !== null) {
+          this.memoryHistory.value = (prev: number[]) =>
+            appendHistory(prev, [mem.percent], this.config.maxHistory);
+        }
+      });
     };
 
     this.#memoryInterval = setInterval(update, 2000);
