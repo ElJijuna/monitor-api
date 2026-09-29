@@ -356,6 +356,72 @@ test('PerformanceCollector pauses memory sampling while hidden', () => {
   }
 });
 
+test('PerformanceCollector pauses sampling on freeze and resyncs on resume and pageshow', () => {
+  const browser = installPerformanceBrowser();
+  const { document, listeners } = installDocument('visible');
+  const windowListeners = new Map<string, () => void>();
+  const window = {
+    addEventListener: jest.fn((type: string, listener: () => void) => {
+      windowListeners.set(type, listener);
+    }),
+    removeEventListener: jest.fn((type: string) => {
+      windowListeners.delete(type);
+    }),
+  };
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: window });
+  Object.defineProperty(globalThis.performance, 'memory', {
+    configurable: true,
+    value: {
+      usedJSHeapSize: 10 * 1_048_576,
+      totalJSHeapSize: 20 * 1_048_576,
+      jsHeapSizeLimit: 50 * 1_048_576,
+    },
+  });
+
+  try {
+    const monitor = createMonitor({ collectors: { performance: true } });
+
+    monitor.start();
+    browser.frames[browser.frames.length - 1]?.(1_000);
+
+    // A frozen page stays paused until it is resumed, even while still reported as visible.
+    listeners.get('freeze')?.();
+    jest.advanceTimersByTime(4_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([]);
+
+    listeners.get('resume')?.();
+    browser.frames[browser.frames.length - 1]?.(60_000);
+    browser.frames[browser.frames.length - 1]?.(61_000);
+    jest.advanceTimersByTime(2_000);
+    expect(monitor.performance.fpsHistory.value).toEqual([1]);
+    expect(monitor.performance.memoryHistory.value).toEqual([20]);
+
+    // A back/forward cache restore that fires `pageshow` without `visibilitychange`.
+    document.visibilityState = 'hidden';
+    listeners.get('visibilitychange')?.();
+    document.visibilityState = 'visible';
+    windowListeners.get('pageshow')?.();
+    jest.advanceTimersByTime(2_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([20, 20]);
+
+    // Resuming a page that is still hidden keeps sampling paused.
+    document.visibilityState = 'hidden';
+    listeners.get('freeze')?.();
+    listeners.get('resume')?.();
+    jest.advanceTimersByTime(4_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([20, 20]);
+
+    monitor.stop();
+    expect([...listeners.keys()]).toEqual([]);
+    expect([...windowListeners.keys()]).toEqual([]);
+
+    monitor.destroy();
+  } finally {
+    browser.restore();
+  }
+});
+
 test('PerformanceCollector ignores memory ticks after stop and when memory is unavailable', () => {
   const browser = installPerformanceBrowser();
 

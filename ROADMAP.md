@@ -41,6 +41,12 @@ Items are grouped by area and ordered by priority within each group.
   context for `NetworkCollector`.
 - [ ] **Online status** (`navigator.onLine` plus the `online` and `offline`
   events): supported by all engines.
+- [ ] **Latency across a frozen page**: `NetworkCollector` measures fetch and XHR
+  `latency` with `performance.now()`, which keeps advancing while the page is
+  frozen or in the back/forward cache. A request that starts before `freeze` and
+  settles after `resume` reports the frozen time as latency. Flag these requests
+  (for example with a `suspended` field) or exclude them from latency
+  aggregates.
 
 ## Performance timeline
 
@@ -62,8 +68,9 @@ those metrics do not expose.
 
 - [x] **Pause sampling while hidden**: FPS and memory sampling pause while
   `document.visibilityState === 'hidden'`, so histories only reflect visible time.
-- [ ] **`freeze` and `resume` events**: detect when the browser freezes a
-  background tab, and avoid reporting the gap as a long task or an FPS drop.
+- [x] **`freeze` and `resume` events**: `freeze` pauses sampling like `hidden`;
+  `resume` and `pageshow` re-read the visibility state, so sampling restarts after a
+  back/forward cache restore even when `visibilitychange` is not fired.
 
 ## Errors and reporting
 

@@ -168,9 +168,7 @@ export class PerformanceCollector implements IPerformanceCollector {
 
     this.#started = true;
 
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', this.#onVisibilityChange);
-    }
+    this.#listenLifecycle('addEventListener');
 
     this.#startFps();
     this.#startMemory();
@@ -182,9 +180,7 @@ export class PerformanceCollector implements IPerformanceCollector {
   stop(): void {
     this.#started = false;
 
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', this.#onVisibilityChange);
-    }
+    this.#listenLifecycle('removeEventListener');
 
     this.#generation += 1;
     this.#clsSessionValue = 0;
@@ -279,16 +275,42 @@ export class PerformanceCollector implements IPerformanceCollector {
     this.#rafId = requestAnimationFrame(loop);
   }
 
-  #onVisibilityChange = (): void => {
+  /**
+   * Browsers freeze only hidden or back/forward-cached pages, so `freeze` pauses sampling like
+   * `hidden`. `resume` and `pageshow` re-read the visibility state, so sampling restarts even
+   * when a back/forward cache restore does not fire `visibilitychange`.
+   */
+  #listenLifecycle(method: 'addEventListener' | 'removeEventListener'): void {
+    if (typeof document !== 'undefined') {
+      document[method]('visibilitychange', this.#onLifecycleChange);
+      document[method]('freeze', this.#onFreeze);
+      document[method]('resume', this.#onLifecycleChange);
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window[method]('pageshow', this.#onLifecycleChange);
+    }
+  }
+
+  #onLifecycleChange = (): void => {
+    this.#syncSampling(isHidden());
+  };
+
+  #onFreeze = (): void => {
+    this.#syncSampling(true);
+  };
+
+  /** Restarts the FPS baseline so a pause is never measured as slow frames. */
+  #syncSampling(paused: boolean): void {
     this.#lastFpsTime = 0;
     this.#frameCount = 0;
 
-    if (isHidden()) {
+    if (paused) {
       this.#pauseMemory();
     } else {
       this.#startMemory();
     }
-  };
+  }
 
   /** Samples memory every two seconds while the page is visible; hidden time is not recorded. */
   #startMemory(): void {
