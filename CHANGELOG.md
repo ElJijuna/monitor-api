@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/ElJijuna/monitor-api/compare/v1.7.0...v1.7.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* update ssignal dependency to version 1.9.1 and remove shallowEqual usage in PerformanceCollector ([0d832d7](https://github.com/ElJijuna/monitor-api/commit/0d832d71848a6d6aca2abd3030aeebff817280b5))
+
 # [1.7.0](https://github.com/ElJijuna/monitor-api/compare/v1.6.0...v1.7.0) (2026-09-29)
 
 
