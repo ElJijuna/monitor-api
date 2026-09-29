@@ -133,10 +133,6 @@ async function attemptDelivery(
   let timedOut = false;
 
   try {
-    if (signal.aborted) {
-      throw new Error('Report cancelled');
-    }
-
     const timeout = resolveTimeout(report);
 
     if (timeout !== null) {
@@ -186,7 +182,9 @@ export function createReporter(
   let interval: ReturnType<typeof setInterval> | undefined;
   let started = false;
   let destroyed = false;
-  let active: { controller: AbortController; promise: Promise<boolean> } | null = null;
+  /** The pending flush. `done` is set once its outcome is being recorded, so stop no longer cancels it. */
+  let active: { controller: AbortController; promise: Promise<boolean>; done: boolean } | null =
+    null;
   let hiddenFlushSent = false;
 
   const update = (patch: Partial<ReporterSnapshot>) => {
@@ -225,17 +223,22 @@ export function createReporter(
     }
   }
 
+  /**
+   * Runs the attempts of one delivery. `complete` marks it finished right before the outcome is
+   * recorded, so a stop observed from that update does not also count it as cancelled.
+   * The signal is checked after every await; waiting for a retry rejects once it aborts.
+   */
   async function deliver(
     config: ProductionReportConfig,
     request: Omit<ProductionReportRequest, 'signal'>,
     signal: AbortSignal,
+    complete: () => void,
   ): Promise<boolean> {
-    try {
-      for (let attempt = 1; attempt <= (config.retry?.maxAttempts ?? 1); attempt += 1) {
-        if (signal.aborted) {
-          return false;
-        }
+    const maxAttempts = config.retry?.maxAttempts ?? 1;
 
+    try {
+      // Every iteration returns or throws; the last attempt rethrows its error.
+      for (let attempt = 1; ; attempt += 1) {
         update({ status: 'sending', attempts: state.value.attempts + 1 });
 
         // Subscribers may stop the monitor while observing a status change.
@@ -250,6 +253,7 @@ export function createReporter(
             return false;
           }
 
+          complete();
           update({
             status: 'idle',
             sent: state.value.sent + 1,
@@ -263,10 +267,7 @@ export function createReporter(
             return false;
           }
 
-          if (
-            attempt >= (config.retry?.maxAttempts ?? 1) ||
-            config.retry?.shouldRetry?.(error, attempt) === false
-          ) {
+          if (attempt >= maxAttempts || config.retry?.shouldRetry?.(error, attempt) === false) {
             throw error;
           }
 
@@ -280,6 +281,7 @@ export function createReporter(
       }
     } catch (error) {
       if (!signal.aborted) {
+        complete();
         update({
           status: 'idle',
           failed: state.value.failed + 1,
@@ -310,6 +312,12 @@ export function createReporter(
       promise: new Promise<boolean>((resolve) => {
         settle = resolve;
       }),
+      done: false,
+    };
+    const release = () => {
+      if (active === run) {
+        active = null;
+      }
     };
 
     active = run;
@@ -320,10 +328,7 @@ export function createReporter(
         update({ dropped: state.value.dropped + 1, lastFailure: request });
       }
 
-      if (active === run) {
-        active = null;
-      }
-
+      release();
       settle(false);
 
       return run.promise;
@@ -336,20 +341,17 @@ export function createReporter(
     }
 
     void (async () => {
+      let sent = false;
+
+      // deliver records every error itself; the slot stays taken until it returns, so a flush
+      // requested while the outcome is recorded reuses this run.
       try {
-        const sent = await deliver(report, request, controller.signal);
-
-        if (active === run) {
-          active = null;
-        }
-
+        sent = await deliver(report, request, controller.signal, () => {
+          run.done = true;
+        });
+      } finally {
+        release();
         settle(sent);
-      } catch {
-        if (active === run) {
-          active = null;
-        }
-
-        settle(false);
       }
     })();
 
@@ -447,7 +449,10 @@ export function createReporter(
     pending?.controller.abort();
 
     if (enabled && report) {
-      update({ status: 'stopped', cancelled: state.value.cancelled + Number(pending !== null) });
+      update({
+        status: 'stopped',
+        cancelled: state.value.cancelled + Number(pending !== null && !pending.done),
+      });
     }
   }
 

@@ -849,6 +849,77 @@ describe('createReporter lifecycle', () => {
       instance.destroy();
     }
   });
+
+  test('a stop observed from the success update does not also count the delivery as cancelled', async () => {
+    const instance = reporter();
+
+    try {
+      instance.start();
+      instance.snapshot.subscribe((snapshot) => {
+        if (snapshot.sent === 1 && snapshot.status === 'idle') {
+          instance.stop();
+        }
+      });
+
+      expect(await instance.flush()).toBe(true);
+      expect(instance.snapshot.value).toMatchObject({
+        status: 'stopped',
+        sent: 1,
+        cancelled: 0,
+      });
+    } finally {
+      instance.destroy();
+    }
+  });
+
+  test('a stop observed from the failure update does not also count the delivery as cancelled', async () => {
+    const instance = reporter({
+      transport: () => {
+        throw new Error('down');
+      },
+    });
+
+    try {
+      instance.start();
+      instance.snapshot.subscribe((snapshot) => {
+        if (snapshot.failed === 1 && snapshot.status === 'idle') {
+          instance.stop();
+        }
+      });
+
+      expect(await instance.flush()).toBe(false);
+      expect(instance.snapshot.value).toMatchObject({
+        status: 'stopped',
+        failed: 1,
+        cancelled: 0,
+      });
+    } finally {
+      instance.destroy();
+    }
+  });
+
+  test('a flush requested while the outcome is recorded reuses the settling delivery', async () => {
+    const transport = jest.fn<() => void>();
+    const instance = reporter({ transport });
+    const reentrant: Array<Promise<boolean>> = [];
+
+    try {
+      instance.start();
+      instance.snapshot.subscribe((snapshot) => {
+        if (snapshot.sent === 1 && reentrant.length === 0) {
+          reentrant.push(instance.flush());
+        }
+      });
+
+      const first = instance.flush();
+
+      expect(await first).toBe(true);
+      expect(reentrant[0]).toBe(first);
+      expect(transport).toHaveBeenCalledTimes(1);
+    } finally {
+      instance.destroy();
+    }
+  });
 });
 
 describe('flushOnHide with the default transport', () => {
