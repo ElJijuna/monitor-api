@@ -6,3 +6,4 @@ test-results/
 *.tsbuildinfo
 .env
 .env.local
+coverage
