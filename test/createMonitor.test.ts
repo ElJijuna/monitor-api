@@ -554,3 +554,23 @@ test('production reporting does not overlap pending requests', async () => {
     });
   }
 });
+
+test('a monitor declared with using is destroyed at the end of its block', () => {
+  let reporter: ReturnType<typeof createMonitor>['reporter'];
+
+  jest.useFakeTimers();
+
+  {
+    using monitor = createMonitor({
+      collectors: [],
+      env: 'production',
+      report: { endpoint: '/metrics', interval: 1000, transport: () => {} },
+    });
+
+    ({ reporter } = monitor);
+    monitor.start();
+    expect(reporter.snapshot.value.status).toBe('idle');
+  }
+
+  expect(reporter.snapshot.value.status).toBe('destroyed');
+});

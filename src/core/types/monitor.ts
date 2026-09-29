@@ -183,4 +183,9 @@ export interface Monitor {
   stop(): void;
   /** Stops collectors and releases signal subscriptions owned by this monitor. */
   destroy(): void;
+  /**
+   * Same as `destroy()`, so a monitor can be declared with `using`. Present only where the
+   * runtime defines `Symbol.dispose`.
+   */
+  [Symbol.dispose](): void;
 }

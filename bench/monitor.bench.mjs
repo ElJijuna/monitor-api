@@ -50,16 +50,32 @@ function runLoop(fn, durationMs) {
   return { elapsed, iterations };
 }
 
-function bench(name, fn) {
+/**
+ * Engines keep some objects alive until the current job ends (for example WeakRef targets), so
+ * one long synchronous run retains the garbage of every case. Yielding between samples lets it go;
+ * the yield itself is outside the measured time.
+ */
+function endJob() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function bench(name, fn) {
+  await endJob();
   runLoop(fn, WARMUP_MS);
-  const samples = Array.from({ length: SAMPLE_COUNT }, () => {
+  const samples = [];
+
+  for (let i = 0; i < SAMPLE_COUNT; i++) {
+    await endJob();
     const { elapsed, iterations } = runLoop(fn, SAMPLE_MS);
-    return {
+
+    samples.push({
       hz: iterations / (elapsed / 1000),
       avgMs: elapsed / iterations,
       iterations,
-    };
-  }).sort((a, b) => a.hz - b.hz);
+    });
+  }
+
+  samples.sort((a, b) => a.hz - b.hz);
   const median = samples[Math.floor(samples.length / 2)];
 
   return { name, ...median };
@@ -134,6 +150,9 @@ function resetWebVitalsBrowser() {
   Reflect.deleteProperty(globalThis, 'removeEventListener');
 }
 
+// React's PerformedWork flag: every bench fiber counts as a real render, not a bailout.
+const PERFORMED_WORK = 0b1;
+
 function fiberFor(type, actualDuration = 1) {
   return {
     tag: 0,
@@ -141,7 +160,7 @@ function fiberFor(type, actualDuration = 1) {
     alternate: {},
     child: null,
     sibling: null,
-    flags: 0,
+    flags: PERFORMED_WORK,
     actualDuration,
   };
 }
@@ -183,11 +202,11 @@ function fiberSiblings(count) {
   return root;
 }
 
-function runBenchmarks() {
+async function runBenchmarks() {
   const results = [];
 
   results.push(
-    bench('createMonitor + destroy', () => {
+    await bench('createMonitor + destroy', () => {
       const monitor = createMonitor();
       monitor.destroy();
     }),
@@ -201,7 +220,7 @@ function runBenchmarks() {
   eventMonitor.start();
   let eventCount = 0;
   results.push(
-    bench('emitMonitorEvent', () => {
+    await bench('emitMonitorEvent', () => {
       emitMonitorEvent(`bench:${eventCount++ % 20}`, { index: eventCount });
     }),
   );
@@ -209,7 +228,7 @@ function runBenchmarks() {
 
   withWebVitalsBrowser();
   results.push(
-    bench('Web Vitals subscribe + destroy', () => {
+    await bench('Web Vitals subscribe + destroy', () => {
       const monitor = createMonitor({
         collectors: { webVitals: true },
       });
@@ -228,19 +247,19 @@ function runBenchmarks() {
   const hook = globalThis.window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
   const root = { current: fiberList(50) };
   results.push(
-    bench('React commit with 50 fibers', () => {
+    await bench('React commit with 50 fibers', () => {
       hook.onCommitFiberRoot(1, root);
     }),
   );
   const deepRoot = { current: fiberList(1_000) };
   results.push(
-    bench('React commit with 1,000 deep fibers', () => {
+    await bench('React commit with 1,000 deep fibers', () => {
       hook.onCommitFiberRoot(1, deepRoot);
     }),
   );
   const wideRoot = { current: fiberSiblings(1_000) };
   results.push(
-    bench('React commit with 1,000 wide fibers', () => {
+    await bench('React commit with 1,000 wide fibers', () => {
       hook.onCommitFiberRoot(1, wideRoot);
     }),
   );
@@ -251,4 +270,4 @@ function runBenchmarks() {
   print(results);
 }
 
-runBenchmarks();
+await runBenchmarks();

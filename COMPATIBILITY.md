@@ -29,5 +29,8 @@ npm run test:browser
 ```
 
 Older browsers must support the ES2020 output and the APIs used by the enabled
-collectors. Applications that target older syntax should transpile the package
+collectors. The `ssignal` dependency also requires `WeakRef` and
+`FinalizationRegistry` (ES2021: Chrome 84, Firefox 79, Safari 14.1). Declaring a
+monitor with `using` additionally requires `Symbol.dispose`; where it is absent,
+call `monitor.destroy()` instead. Applications that target older syntax should transpile the package
 as part of their own build.

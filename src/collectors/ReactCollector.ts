@@ -203,14 +203,26 @@ function normalizeMaxFiberVisits(value: number | undefined): number {
   return Math.max(0, Math.floor(value));
 }
 
+interface ReactState {
+  entries: RenderEntry[];
+  totalCommits: number;
+  truncatedCommits: number;
+}
+
 export class ReactCollector implements IReactCollector {
   #destroyed = false;
   readonly snapshot: ComputedSignal<ReactSnapshot>;
   readonly onCommit: SSignal<RenderEntry | null>;
 
-  #entries: SSignal<RenderEntry[]>;
-  #totalCommits: SSignal<number>;
-  #truncatedCommits: SSignal<number>;
+  /** One signal, so each commit recomputes the snapshot once. */
+  #state: SSignal<ReactState>;
+  /** Derived from entries; reused while a commit leaves them unchanged. */
+  #derived: {
+    entries: RenderEntry[];
+    slowThreshold: number;
+    byComponent: Record<string, ComponentStats>;
+    slowComponents: RenderEntry[];
+  } | null = null;
   #slowThreshold: number;
   #maxFiberVisits: number;
   #commitCounter = 0;
@@ -221,21 +233,16 @@ export class ReactCollector implements IReactCollector {
     validateMaxHistory(config.maxHistory);
     this.#slowThreshold = config.slowThreshold;
     this.#maxFiberVisits = normalizeMaxFiberVisits(config.maxFiberVisits);
-    this.#entries = new SSignal<RenderEntry[]>([]);
-    this.#totalCommits = new SSignal(0);
-    this.#truncatedCommits = new SSignal(0);
+    this.#state = new SSignal<ReactState>({ entries: [], totalCommits: 0, truncatedCommits: 0 });
     this.onCommit = new SSignal<RenderEntry | null>(null);
 
     this.snapshot = computed(
-      [this.#entries, this.#totalCommits, this.#truncatedCommits],
-      ([entries, totalCommits, truncatedCommits]): ReactSnapshot => ({
+      [this.#state],
+      ([{ entries, totalCommits, truncatedCommits }]): ReactSnapshot => ({
         totalCommits,
         truncatedCommits,
         entries,
-        byComponent: this.#computeByComponent(entries),
-        slowComponents: entries.filter(
-          (entry) => entry.type !== 'unmount' && entry.duration >= this.#slowThreshold,
-        ),
+        ...this.#derive(entries),
       }),
     );
   }
@@ -277,14 +284,12 @@ export class ReactCollector implements IReactCollector {
 
   setSlowThreshold(ms: number): void {
     this.#slowThreshold = ms;
-    // Force snapshot recompute by touching entries
-    this.#entries.value = (prev: RenderEntry[]) => [...prev];
+    // Recompute the snapshot without copying the retained entries.
+    this.#state.mutate(() => {});
   }
 
   clearLog(): void {
-    this.#entries.value = [];
-    this.#totalCommits.value = 0;
-    this.#truncatedCommits.value = 0;
+    this.#state.value = { entries: [], totalCommits: 0, truncatedCommits: 0 };
     this.#pendingUnmounts.clear();
   }
 
@@ -304,18 +309,18 @@ export class ReactCollector implements IReactCollector {
 
     const truncated = this.#walkFiber(root.current, newEntries, now, commitId);
 
-    this.#totalCommits.value = (n: number) => n + 1;
-
-    if (truncated) {
-      this.#truncatedCommits.value = (n: number) => n + 1;
-    }
+    this.#state.value = (prev: ReactState) => ({
+      entries:
+        newEntries.length === 0
+          ? prev.entries
+          : appendHistory(prev.entries, newEntries, this.config.maxHistory),
+      totalCommits: prev.totalCommits + 1,
+      truncatedCommits: prev.truncatedCommits + Number(truncated),
+    });
 
     if (newEntries.length === 0) {
       return;
     }
-
-    this.#entries.value = (prev: RenderEntry[]) =>
-      appendHistory(prev, newEntries, this.config.maxHistory);
 
     // Fire onCommit for the last entry of this batch
     const last = newEntries[newEntries.length - 1];
@@ -340,6 +345,28 @@ export class ReactCollector implements IReactCollector {
         Math.max(1, this.config.maxHistory),
       ),
     );
+  }
+
+  #derive(entries: RenderEntry[]) {
+    const cached = this.#derived;
+
+    if (cached?.entries === entries && cached.slowThreshold === this.#slowThreshold) {
+      return { byComponent: cached.byComponent, slowComponents: cached.slowComponents };
+    }
+
+    const derived = {
+      entries,
+      slowThreshold: this.#slowThreshold,
+      byComponent:
+        cached?.entries === entries ? cached.byComponent : this.#computeByComponent(entries),
+      slowComponents: entries.filter(
+        (entry) => entry.type !== 'unmount' && entry.duration >= this.#slowThreshold,
+      ),
+    };
+
+    this.#derived = derived;
+
+    return { byComponent: derived.byComponent, slowComponents: derived.slowComponents };
   }
 
   #computeByComponent(entries: RenderEntry[]): Record<string, ComponentStats> {

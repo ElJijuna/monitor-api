@@ -775,3 +775,72 @@ test('ReactCollector does not overwrite a newer hook handler when stopped', () =
 
   monitor.destroy();
 });
+
+test('ReactCollector notifies once per commit and reuses stats while entries are unchanged', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  function Component() {}
+
+  const monitor = createMonitor({ collectors: { react: true } });
+  const notify = jest.fn();
+
+  try {
+    monitor.start();
+    monitor.react.snapshot.subscribe(notify);
+
+    commit(Component, 5);
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    const withRender = monitor.react.snapshot.value;
+
+    commitRoot(unprofiledFiberFor(Component));
+    expect(notify).toHaveBeenCalledTimes(2);
+
+    const withoutRender = monitor.react.snapshot.value;
+
+    expect(withoutRender.totalCommits).toBe(2);
+    expect(withoutRender.entries).toBe(withRender.entries);
+    expect(withoutRender.byComponent).toBe(withRender.byComponent);
+    expect(withoutRender.slowComponents).toBe(withRender.slowComponents);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector setSlowThreshold recomputes slow components without copying entries', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  function Fast() {}
+
+  function Slow() {}
+
+  const monitor = createMonitor({ collectors: { react: { slowThreshold: 16 } } });
+  const notify = jest.fn();
+
+  try {
+    monitor.start();
+    commit(Fast, 4);
+    commit(Slow, 20);
+
+    const before = monitor.react.snapshot.value;
+
+    expect(before.slowComponents.map((entry) => entry.component)).toEqual(['Slow']);
+    monitor.react.snapshot.subscribe(notify);
+    monitor.react.setSlowThreshold(2);
+
+    const after = monitor.react.snapshot.value;
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(after.entries).toBe(before.entries);
+    expect(after.byComponent).toBe(before.byComponent);
+    expect(after.slowComponents.map((entry) => entry.component)).toEqual(['Fast', 'Slow']);
+  } finally {
+    monitor.destroy();
+  }
+});

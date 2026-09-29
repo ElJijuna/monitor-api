@@ -97,6 +97,18 @@ monitor.destroy()  // stop + dispose all signals
 `monitor.start()` is idempotent. Calling it more than once does not duplicate
 event listeners, network patches, or React commit hooks.
 
+Where the runtime supports explicit resource management, a monitor can be
+declared with `using`, which calls `destroy()` when the block ends. This is
+handy in tests and scripts:
+
+```ts
+{
+  using monitor = createMonitor({ collectors: ['events'] })
+  monitor.start()
+  // ...
+} // monitor.destroy() runs here
+```
+
 ---
 
 ## Runtime safety

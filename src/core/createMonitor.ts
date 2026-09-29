@@ -278,7 +278,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     signal.dispose();
   }
 
-  const monitor: Monitor = {
+  const monitor: Omit<Monitor, typeof Symbol.dispose> & Partial<Monitor> = {
     reporter,
     performance,
     network,
@@ -294,5 +294,10 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     destroy: destroyAll,
   };
 
-  return monitor;
+  // Older runtimes have no Symbol.dispose, and `using` is unavailable there as well.
+  if (typeof Symbol.dispose === 'symbol') {
+    monitor[Symbol.dispose] = destroyAll;
+  }
+
+  return monitor as Monitor;
 }

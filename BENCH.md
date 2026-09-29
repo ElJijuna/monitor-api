@@ -11,18 +11,23 @@ provide absolute performance guarantees. They run against the built package in
 - Build target: published `dist/` output
 - Warmup per case: 100 ms
 - Samples per case: 5 × 300 ms; table reports the median
+- The runner yields to the event loop before each sample, outside the measured
+  time, so garbage kept alive until the end of a job (such as `WeakRef` targets)
+  is released between samples
+- React fibers carry the `PerformedWork` flag, so every fiber counts as a real
+  render
 - Batch size: 100 operations
 
 ## Results
 
 | Benchmark | Throughput | Average time |
 | --- | ---: | ---: |
-| `createMonitor + destroy` | 45,318 ops/s | 22.07 us |
-| `emitMonitorEvent` | 190,914 ops/s | 5.24 us |
-| `Web Vitals subscribe + destroy` | 87,436 ops/s | 11.44 us |
-| `React commit with 50 fibers` | 17,103 ops/s | 58.47 us |
-| `React commit with 1,000 deep fibers` | 1,704 ops/s | 587 us |
-| `React commit with 1,000 wide fibers` | 1,291 ops/s | 775 us |
+| `createMonitor + destroy` | 44,679 ops/s | 22.38 us |
+| `emitMonitorEvent` | 200,120 ops/s | 5.00 us |
+| `Web Vitals subscribe + destroy` | 112,132 ops/s | 8.92 us |
+| `React commit with 50 fibers` | 62,522 ops/s | 15.99 us |
+| `React commit with 1,000 deep fibers` | 13,600 ops/s | 73.53 us |
+| `React commit with 1,000 wide fibers` | 13,338 ops/s | 75.0 us |
 
 ## Interpretation
 
@@ -44,15 +49,16 @@ browser's internal metric calculation, which belongs to the platform and the
 
 The React cases cover a normal 50-fiber commit plus deep and wide 1,000-fiber
 trees. The collector walks each tree, creates render entries, trims retained
-history, and derives per-component statistics. The wide case is slower because
-it retains and aggregates many sibling component names.
+history, and derives per-component statistics. Commit counters and entries live
+in one signal, so each commit recomputes the snapshot once, and the derived
+statistics are reused when a commit adds no render entries.
 
 ## Potential Improvements
 
 No urgent optimization is required based on these numbers.
 
 The main future improvement would be to avoid recomputing aggregate maps from
-retained history on every snapshot. `ReactCollector.byComponent` and
+retained history on every snapshot that adds entries. `ReactCollector.byComponent` and
 `EventCollector.byLabel` are currently derived from retained entries to keep
 runtime memory bounded. That is the right default for correctness and safety.
 If benchmarks show this becoming expensive in larger histories, we can maintain
