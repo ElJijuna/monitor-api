@@ -15,8 +15,20 @@ if (typeof globalThis.CustomEvent === 'undefined') {
   });
 }
 
+const realTimers = {
+  clearInterval: globalThis.clearInterval,
+  clearTimeout: globalThis.clearTimeout,
+  setInterval: globalThis.setInterval,
+  setTimeout: globalThis.setTimeout,
+};
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, 'window');
+  jest.useRealTimers();
+  globalThis.clearInterval = realTimers.clearInterval;
+  globalThis.clearTimeout = realTimers.clearTimeout;
+  globalThis.setInterval = realTimers.setInterval;
+  globalThis.setTimeout = realTimers.setTimeout;
 });
 
 interface TestFiber {
@@ -867,6 +879,314 @@ test('ReactCollector setSlowThreshold does not notify when the threshold is unch
 
     expect(notify).not.toHaveBeenCalled();
     expect(monitor.react.snapshot.value).toBe(before);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+function unmount(fiber: TestFiber): void {
+  const testWindow = globalThis.window as unknown as {
+    __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook;
+  };
+
+  testWindow.__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberUnmount(1, fiber);
+}
+
+test('ReactCollector resolves forwardRef, memo and anonymous component names', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Rendered() {}
+
+  const nameless = () => {};
+
+  Object.defineProperty(nameless, 'name', { value: undefined });
+
+  const namedRef = fiberFor({ $$typeof: Symbol.for('react.forward_ref'), displayName: 'Named' });
+  const renderRef = fiberFor({
+    $$typeof: Symbol.for('react.memo'),
+    type: { $$typeof: Symbol.for('react.forward_ref'), render: Rendered },
+  });
+  const unknownObject = fiberFor({ $$typeof: Symbol.for('react.lazy') });
+  const anonymous = fiberFor(nameless);
+  const host = fiberFor('div');
+
+  namedRef.sibling = renderRef;
+  renderRef.sibling = unknownObject;
+  unknownObject.sibling = anonymous;
+  anonymous.sibling = host;
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commitRoot(namedRef);
+
+    expect(monitor.react.snapshot.value.entries.map((entry) => entry.component)).toEqual([
+      'Named',
+      'Rendered',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector treats an unprofiled child as taking no time of its parent', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Parent() {}
+
+  const parent = fiberFor(Parent, 5);
+
+  parent.child = unprofiledFiberFor('span');
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commitRoot(parent);
+
+    expect(monitor.react.snapshot.value.entries).toEqual([
+      expect.objectContaining({ component: 'Parent', duration: 5 }),
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector accepts an unlimited fiber visit budget', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Leaf() {}
+
+  const monitor = createMonitor({
+    collectors: { react: { maxFiberVisits: Number.POSITIVE_INFINITY } },
+  });
+
+  try {
+    monitor.start();
+    commit(Leaf);
+
+    expect(monitor.react.snapshot.value.truncatedCommits).toBe(0);
+    expect(monitor.react.snapshot.value.entries).toHaveLength(1);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector ignores empty roots and unmounts of unnamed fibers', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    unmount(fiberFor('div'));
+    (
+      globalThis.window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook }
+    ).__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot(1, {
+      current: null as unknown as TestFiber,
+    });
+
+    expect(monitor.react.snapshot.value).toMatchObject({ totalCommits: 1, entries: [] });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector clearLog resets history and drops pending unmounts', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Gone() {}
+
+  function Stays() {}
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commit(Stays);
+    unmount(fiberFor(Gone));
+    monitor.react.clearLog();
+
+    expect(monitor.react.snapshot.value).toMatchObject({ totalCommits: 0, entries: [] });
+
+    commit(Stays);
+
+    expect(monitor.react.snapshot.value.entries.map((entry) => entry.type)).toEqual(['mount']);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector stays inert after destroy', () => {
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  monitor.destroy();
+  monitor.react.destroy();
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  monitor.react.start();
+
+  expect(
+    (globalThis.window as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown })
+      .__REACT_DEVTOOLS_GLOBAL_HOOK__,
+  ).toBeUndefined();
+});
+
+test('ReactCollector walks past fibers without a type such as the host root', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function App() {}
+
+  const hostRoot = fiberFor(null, 4);
+
+  hostRoot.tag = 3;
+  hostRoot.child = fiberFor(App, 4);
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commitRoot(hostRoot);
+
+    expect(monitor.react.snapshot.value.entries.map((entry) => entry.component)).toEqual(['App']);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector aggregates renders, averages and last render time per component', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  jest.useFakeTimers({ now: 1_000 });
+
+  function Card() {}
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commit(Card, 2);
+    jest.setSystemTime(2_000);
+    commit(Card, 3);
+    jest.setSystemTime(3_000);
+    commit(Card, 3);
+
+    expect(monitor.react.snapshot.value.byComponent.Card).toEqual({
+      renders: 3,
+      totalDuration: 8,
+      avgDuration: 2.7,
+      lastRender: 3_000,
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector onCommit reports the last entry of each commit', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Parent() {}
+
+  function Child() {}
+
+  const root = fiberFor(Parent, 3);
+
+  root.child = fiberFor(Child, 1);
+
+  const monitor = createMonitor({ collectors: { react: true } });
+  const seen: string[] = [];
+
+  try {
+    monitor.react.onCommit.subscribe((entry) => {
+      if (entry) {
+        seen.push(entry.component);
+      }
+    });
+    monitor.start();
+    commitRoot(root);
+    commitRoot(unprofiledFiberFor(Parent));
+
+    expect(seen).toEqual(['Child']);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector never lists unmounts as slow components', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Slow() {}
+
+  function Removed() {}
+
+  const monitor = createMonitor({ collectors: { react: { slowThreshold: 0 } } });
+
+  try {
+    monitor.start();
+    unmount(fiberFor(Removed));
+    commit(Slow, 1);
+
+    expect(monitor.react.snapshot.value.slowComponents.map((entry) => entry.component)).toEqual([
+      'Slow',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector rounds self durations to one decimal', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Precise() {}
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commit(Precise, 1.26);
+
+    expect(monitor.react.snapshot.value.entries[0]?.duration).toBe(1.3);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector clamps a child reporting more time than its parent to zero', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Parent() {}
+
+  function Child() {}
+
+  const root = fiberFor(Parent, 1);
+
+  root.child = fiberFor(Child, 5);
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commitRoot(root);
+
+    expect(monitor.react.snapshot.value.entries[0]).toMatchObject({
+      component: 'Parent',
+      duration: 0,
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector start is a no-op without a window', () => {
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.react.start();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    expect(
+      (globalThis.window as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown })
+        .__REACT_DEVTOOLS_GLOBAL_HOOK__,
+    ).toBeUndefined();
   } finally {
     monitor.destroy();
   }

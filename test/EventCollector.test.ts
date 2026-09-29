@@ -321,3 +321,55 @@ test('EventCollector counts labels that match inherited object keys', () => {
     monitor.destroy();
   }
 });
+
+test('EventCollector measures multi-byte UTF-8 data against the byte limit', () => {
+  // {"v":"ñ€😀"} is 8 ASCII bytes plus 2 + 3 + 4 bytes for the three characters.
+  const data = { v: 'ñ€😀' };
+  const exact = createMonitor({ collectors: { events: { maxDataBytes: 17 } } });
+  const tooSmall = createMonitor({ collectors: { events: { maxDataBytes: 16 } } });
+
+  try {
+    exact.events.emit('utf8', data);
+    tooSmall.events.emit('utf8', data);
+
+    expect(exact.events.snapshot.value.entries[0]?.data).toEqual(data);
+    expect(tooSmall.events.snapshot.value.entries[0]?.data).toBeNull();
+  } finally {
+    exact.destroy();
+    tooSmall.destroy();
+  }
+});
+
+test('EventCollector drops data that cannot be serialized', () => {
+  const monitor = createMonitor({ collectors: { events: true } });
+
+  try {
+    monitor.events.emit('bigint', { value: 1n });
+
+    expect(monitor.events.snapshot.value.entries[0]).toMatchObject({ label: 'bigint', data: null });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('EventCollector rejects non-string labels and stays inert after destroy', () => {
+  const target = new EventTarget();
+  const addEventListener = jest.spyOn(target, 'addEventListener');
+  const monitor = createMonitor({ collectors: { events: true } });
+
+  monitor.events.emit(42 as unknown as string);
+  expect(monitor.events.snapshot.value.entries).toEqual([]);
+
+  monitor.destroy();
+  monitor.events.destroy();
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+  monitor.events.start();
+  monitor.events.emit('late');
+
+  expect(addEventListener).not.toHaveBeenCalled();
+  expect(monitor.events.snapshot.value.entries).toEqual([]);
+});
+
+test('emitMonitorEvent is a no-op outside the browser', () => {
+  expect(() => emitMonitorEvent('server-side')).not.toThrow();
+});

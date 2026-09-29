@@ -15,7 +15,16 @@ class FakeXMLHttpRequest extends EventTarget {
 
   open(): void {}
 
+  /** When false, send leaves the request in flight until complete() is called. */
+  autoComplete = true;
+
   send(): void {
+    if (this.autoComplete) {
+      this.complete();
+    }
+  }
+
+  complete(): void {
     this.dispatchEvent(new Event('loadend'));
   }
 
@@ -24,9 +33,21 @@ class FakeXMLHttpRequest extends EventTarget {
   }
 }
 
+const realTimers = {
+  clearInterval: globalThis.clearInterval,
+  clearTimeout: globalThis.clearTimeout,
+  setInterval: globalThis.setInterval,
+  setTimeout: globalThis.setTimeout,
+};
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, 'window');
   Reflect.deleteProperty(globalThis, 'XMLHttpRequest');
+  jest.useRealTimers();
+  globalThis.clearInterval = realTimers.clearInterval;
+  globalThis.clearTimeout = realTimers.clearTimeout;
+  globalThis.setInterval = realTimers.setInterval;
+  globalThis.setTimeout = realTimers.setTimeout;
 });
 
 test('NetworkCollector records filtered fetch requests inside maxHistory', async () => {
@@ -809,5 +830,325 @@ test('window aggregates retain all traffic independently of a one-entry history'
   } finally {
     monitor.destroy();
     jest.useRealTimers();
+  }
+});
+
+function installNetworkBrowser(fetchImpl: typeof fetch) {
+  const fetchMock = jest.fn(fetchImpl);
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { fetch: fetchMock } });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {
+    configurable: true,
+    value: FakeXMLHttpRequest as unknown as typeof XMLHttpRequest,
+  });
+
+  return globalThis.window as unknown as { fetch: typeof fetch };
+}
+
+test('NetworkCollector measures every supported fetch body and input shape', async () => {
+  const testWindow = installNetworkBrowser(async () => new Response(null, { status: 404 }));
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+    await testWindow.fetch(new URL('https://example.test/blob'), {
+      method: 'PUT',
+      body: new Blob(['12345']),
+    });
+    await testWindow.fetch(new Request('https://example.test/request', { method: 'DELETE' }), {
+      body: new ArrayBuffer(8),
+    });
+    await testWindow.fetch('/view', { method: 'POST', body: new Uint8Array(3) });
+    await testWindow.fetch('/params', { method: 'POST', body: new URLSearchParams('a=1') });
+
+    const snapshot = monitor.network.snapshot.value;
+
+    expect(
+      snapshot.entries.map(({ url, method, requestSize }) => ({ url, method, requestSize })),
+    ).toEqual([
+      { url: 'https://example.test/blob', method: 'PUT', requestSize: 5 },
+      { url: 'https://example.test/request', method: 'DELETE', requestSize: 8 },
+      { url: '/view', method: 'POST', requestSize: 3 },
+      { url: '/params', method: 'POST', requestSize: 0 },
+    ]);
+    expect(snapshot.window5s.errorRate).toBe(1);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector records failed fetches and rethrows the original error', async () => {
+  let failure: unknown = new TypeError('offline');
+
+  const testWindow = installNetworkBrowser(async () => {
+    throw failure;
+  });
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+    await expect(testWindow.fetch('/offline')).rejects.toThrow('offline');
+    failure = 'aborted';
+    await expect(testWindow.fetch('/aborted')).rejects.toBe('aborted');
+
+    expect(
+      monitor.network.snapshot.value.entries.map(({ status, error }) => ({ status, error })),
+    ).toEqual([
+      { status: 0, error: 'offline' },
+      { status: 0, error: 'Network error' },
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector reports zero payload when response headers cannot be read', async () => {
+  const response = new Response('body');
+
+  Object.defineProperty(response, 'headers', {
+    get() {
+      throw new Error('opaque');
+    },
+  });
+
+  const testWindow = installNetworkBrowser(async () => response);
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+    await testWindow.fetch('/opaque');
+
+    expect(monitor.network.snapshot.value.entries[0]?.payloadSize).toBe(0);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector records XHR defaults, binary sizes and network failures', () => {
+  installNetworkBrowser(async () => new Response());
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const unopened = new XMLHttpRequest();
+
+    unopened.send();
+
+    const binary = new XMLHttpRequest() as unknown as FakeXMLHttpRequest;
+
+    (binary as unknown as { response: unknown }).response = new ArrayBuffer(16);
+    (binary as unknown as XMLHttpRequest).open('post', new URL('https://example.test/binary'));
+    (binary as unknown as XMLHttpRequest).send('abc');
+
+    const failed = new XMLHttpRequest() as unknown as FakeXMLHttpRequest;
+
+    failed.status = 0;
+
+    failed.getResponseHeader = () => {
+      throw new Error('not available');
+    };
+
+    (failed as unknown as XMLHttpRequest).open('GET', '/failed');
+    (failed as unknown as XMLHttpRequest).send();
+
+    expect(
+      monitor.network.snapshot.value.entries.map(({ url, method, payloadSize, error }) => ({
+        url,
+        method,
+        payloadSize,
+        error,
+      })),
+    ).toEqual([
+      { url: '', method: 'GET', payloadSize: 0, error: null },
+      { url: 'https://example.test/binary', method: 'POST', payloadSize: 16, error: null },
+      { url: '/failed', method: 'GET', payloadSize: 0, error: 'Network error' },
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector starts without fetch or XMLHttpRequest and stays inert after destroy', async () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  monitor.start();
+  expect(monitor.network.snapshot.value.entries).toEqual([]);
+  monitor.destroy();
+  monitor.destroy();
+
+  const testWindow = installNetworkBrowser(async () => new Response());
+
+  monitor.network.start();
+  await testWindow.fetch('/after-destroy');
+
+  expect(monitor.network.snapshot.value.entries).toEqual([]);
+});
+
+test('NetworkCollector ignores Content-Length values beyond the safe integer range', async () => {
+  const response = new Response('x', { headers: { 'content-length': '99999999999999999999' } });
+  const testWindow = installNetworkBrowser(async () => response);
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+    await testWindow.fetch('/huge');
+
+    expect(monitor.network.snapshot.value.entries[0]?.payloadSize).toBe(0);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('a duplicate XHR send while in flight is passed through without a second entry', () => {
+  installNetworkBrowser(async () => new Response());
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const xhr = new XMLHttpRequest() as unknown as FakeXMLHttpRequest;
+    const send = jest.spyOn(FakeXMLHttpRequest.prototype, 'send');
+
+    xhr.autoComplete = false;
+    (xhr as unknown as XMLHttpRequest).open('GET', '/pending');
+    (xhr as unknown as XMLHttpRequest).send();
+    (xhr as unknown as XMLHttpRequest).send();
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(monitor.network.snapshot.value.entries).toEqual([]);
+
+    xhr.complete();
+
+    expect(monitor.network.snapshot.value.entries.map((entry) => entry.url)).toEqual(['/pending']);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('reopening an in-flight XHR abandons the previous request', () => {
+  installNetworkBrowser(async () => new Response());
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    const xhr = new XMLHttpRequest() as unknown as FakeXMLHttpRequest;
+
+    xhr.autoComplete = false;
+    (xhr as unknown as XMLHttpRequest).open('GET', '/first');
+    (xhr as unknown as XMLHttpRequest).send();
+    (xhr as unknown as XMLHttpRequest).open('POST', '/second');
+    (xhr as unknown as XMLHttpRequest).send('body');
+    xhr.complete();
+
+    expect(
+      monitor.network.snapshot.value.entries.map(({ url, method, requestSize }) => ({
+        url,
+        method,
+        requestSize,
+      })),
+    ).toEqual([{ url: '/second', method: 'POST', requestSize: 4 }]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector counts HTTP error statuses in the window error rate', async () => {
+  const statuses = [200, 404, 500, 204];
+  const testWindow = installNetworkBrowser(
+    async () => new Response(null, { status: statuses.shift() ?? 200 }),
+  );
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+
+    for (let index = 0; index < 4; index += 1) {
+      await testWindow.fetch(`/r${index}`);
+    }
+
+    expect(monitor.network.snapshot.value.window5s).toMatchObject({ count: 4, errorRate: 0.5 });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector notifies onRequest with every recorded entry', async () => {
+  const testWindow = installNetworkBrowser(async () => new Response());
+  const monitor = createMonitor({ collectors: { network: { filter: (url) => url !== '/skip' } } });
+  const seen: string[] = [];
+
+  try {
+    monitor.network.onRequest.subscribe((entry) => {
+      if (entry) {
+        seen.push(entry.url);
+      }
+    });
+    monitor.start();
+    await testWindow.fetch('/a');
+    await testWindow.fetch('/skip');
+    await testWindow.fetch('/b');
+
+    expect(seen).toEqual(['/a', '/b']);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector clearLog resets entries and the rolling window', async () => {
+  jest.useFakeTimers();
+
+  const testWindow = installNetworkBrowser(async () => new Response());
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.start();
+    await testWindow.fetch('/before');
+    expect(jest.getTimerCount()).toBeGreaterThan(0);
+
+    monitor.network.clearLog();
+
+    expect(monitor.network.snapshot.value).toEqual({
+      entries: [],
+      window5s: { count: 0, avgLatency: 0, totalPayload: 0, errorRate: 0 },
+    });
+    expect(jest.getTimerCount()).toBe(0);
+
+    await testWindow.fetch('/after');
+    expect(monitor.network.snapshot.value.window5s.count).toBe(1);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('NetworkCollector destroy is idempotent at the collector level', () => {
+  const testWindow = installNetworkBrowser(async () => new Response());
+  const originalFetch = testWindow.fetch;
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  monitor.start();
+  expect(testWindow.fetch).not.toBe(originalFetch);
+
+  monitor.network.destroy();
+  monitor.network.destroy();
+
+  expect(testWindow.fetch).toBe(originalFetch);
+  monitor.destroy();
+});
+
+test('NetworkCollector start is a no-op without a window', () => {
+  const monitor = createMonitor({ collectors: { network: true } });
+
+  try {
+    monitor.network.start();
+    installNetworkBrowser(async () => new Response());
+    monitor.network.stop();
+
+    expect(monitor.network.snapshot.value.entries).toEqual([]);
+  } finally {
+    monitor.destroy();
   }
 });

@@ -271,3 +271,58 @@ test('the default report sends resource aggregates without URLs, only when enabl
     disabled.destroy();
   }
 });
+
+test('classifies extension-less and unparseable URLs and ignores batches with nothing kept', () => {
+  const monitor = resourcesMonitor();
+
+  try {
+    monitor.start();
+    observers[0]?.deliver([timing('https://app.example.com/asset?v=1')]);
+    observers[0]?.deliver([timing('http://[bad-host/style.css')]);
+    observers[0]?.deliver([timing('https://app.example.com/beacon', { initiatorType: 'beacon' })]);
+
+    expect(
+      monitor.resources.snapshot.value.entries.map(({ type, thirdParty }) => ({
+        type,
+        thirdParty,
+      })),
+    ).toEqual([
+      { type: 'other', thirdParty: false },
+      { type: 'stylesheet', thirdParty: false },
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('start tolerates an observer that rejects the resource entry type', () => {
+  Object.defineProperty(globalThis, 'PerformanceObserver', {
+    configurable: true,
+    value: class {
+      observe(): void {
+        throw new TypeError('unsupported');
+      }
+
+      disconnect(): void {}
+    },
+  });
+
+  const monitor = resourcesMonitor();
+
+  try {
+    expect(() => monitor.start()).not.toThrow();
+    expect(monitor.resources.snapshot.value.entries).toEqual([]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('stays inert after destroy', () => {
+  const monitor = resourcesMonitor();
+
+  monitor.destroy();
+  monitor.resources.destroy();
+  monitor.resources.start();
+
+  expect(observers).toEqual([]);
+});

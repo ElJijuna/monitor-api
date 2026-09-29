@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { createReporter } from '../src/core/createReporter';
 import type { ProductionReportConfig, ProductionReportRequest } from '../src/index';
 import { createMonitor } from '../src/index';
 
@@ -508,6 +509,379 @@ describe('flushOnHide', () => {
       expect(monitor.reporter.snapshot.value.sent).toBe(1);
     } finally {
       monitor.destroy();
+
+      if (realFetch) {
+        Object.defineProperty(globalThis, 'fetch', realFetch);
+      }
+    }
+  });
+});
+
+test.each([0, -1, 1.5, NaN])('rejects invalid maxPayloadBytes %s', (maxPayloadBytes) => {
+  expect(() => reporting({ maxPayloadBytes })).toThrow(RangeError);
+});
+
+test('a transform that serializes to nothing is dropped as a serialization failure', async () => {
+  const transport = jest.fn<() => void>();
+  const monitor = reporting({ transport, transform: () => undefined });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+    expect(monitor.reporter.snapshot.value).toMatchObject({
+      dropped: 1,
+      lastFailure: 'serialization',
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('shouldRetry can stop retrying and the failure keeps a safe category', async () => {
+  const transport = jest.fn(async () => {
+    throw 'not an error';
+  });
+  const shouldRetry = jest.fn(() => false);
+  const monitor = reporting({ transport, retry: { maxAttempts: 3, shouldRetry } });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(shouldRetry).toHaveBeenCalledWith('not an error', 1);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ failed: 1, lastFailure: 'transport' });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('retries without a configured delay', async () => {
+  const transport = jest
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error('flaky'))
+    .mockResolvedValueOnce(undefined);
+  const monitor = reporting({ transport, retry: { maxAttempts: 2 } });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(true);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ retries: 1, sent: 1 });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('the default fetch transport treats a non-OK response as a transport failure', async () => {
+  const realFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: jest.fn(async () => new Response(null, { status: 503 })),
+  });
+
+  const monitor = createMonitor({
+    collectors: [],
+    env: 'production',
+    report: { endpoint: '/metrics', interval: 1000, flushOnHide: false },
+  });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ failed: 1, lastFailure: 'transport' });
+  } finally {
+    monitor.destroy();
+
+    if (realFetch) {
+      Object.defineProperty(globalThis, 'fetch', realFetch);
+    }
+  }
+});
+
+test('a status subscriber that stops the monitor cancels the delivery before the transport runs', async () => {
+  const transport = jest.fn<() => void>();
+  const monitor = reporting({ transport });
+
+  try {
+    monitor.start();
+    monitor.reporter.snapshot.subscribe((snapshot) => {
+      if (snapshot.status === 'sending') {
+        monitor.stop();
+      }
+    });
+
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+    expect(monitor.reporter.snapshot.value).toMatchObject({
+      status: 'stopped',
+      attempts: 1,
+      cancelled: 1,
+      failed: 0,
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('stopping while a retry is scheduled cancels the retry without counting a failure', async () => {
+  const transport = jest.fn(async () => {
+    throw new Error('down');
+  });
+  const monitor = reporting({ transport, retry: { maxAttempts: 3, delay: 60_000 } });
+
+  try {
+    monitor.start();
+    monitor.reporter.snapshot.subscribe((snapshot) => {
+      if (snapshot.status === 'retrying') {
+        monitor.stop();
+      }
+    });
+
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(monitor.reporter.snapshot.value).toMatchObject({
+      status: 'stopped',
+      retries: 1,
+      failed: 0,
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('stopping the monitor inside transform prevents dispatch without counting a drop', async () => {
+  const transport = jest.fn<() => void>();
+  const ref: { monitor?: ReturnType<typeof reporting> } = {};
+  const transform = jest.fn(() => {
+    ref.monitor?.stop();
+
+    throw new Error('transform failed after stop');
+  });
+  const monitor = reporting({ transport, transform });
+
+  ref.monitor = monitor;
+
+  try {
+    monitor.start();
+
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+    expect(monitor.reporter.snapshot.value).toMatchObject({ dropped: 0, status: 'stopped' });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('a successful transform that stops the monitor also prevents dispatch', async () => {
+  const transport = jest.fn<() => void>();
+  const ref: { monitor?: ReturnType<typeof reporting> } = {};
+  const monitor = reporting({
+    transport,
+    transform: (snapshot) => {
+      ref.monitor?.stop();
+
+      return { at: snapshot.timestamp };
+    },
+  });
+
+  ref.monitor = monitor;
+
+  try {
+    monitor.start();
+
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('a transport completing after its timeout does not count as sent', async () => {
+  jest.useFakeTimers();
+
+  let finish!: () => void;
+
+  const monitor = reporting({
+    timeout: 10,
+    transport: () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  });
+
+  try {
+    monitor.start();
+    const sent = monitor.reporter.flush();
+
+    await jest.advanceTimersByTimeAsync(10);
+    finish();
+    await Promise.resolve();
+
+    expect(await sent).toBe(false);
+    expect(monitor.reporter.snapshot.value).toMatchObject({ sent: 0, failed: 1 });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('the request carries the endpoint, JSON body, payload and non-keepalive flag', async () => {
+  const transport = jest.fn<(request: ProductionReportRequest) => void>();
+  const monitor = reporting({ transport, transform: () => ({ ok: true }) });
+
+  try {
+    monitor.start();
+    await monitor.reporter.flush();
+
+    expect(transport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: '/metrics',
+        payload: { ok: true },
+        body: '{"ok":true}',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: false,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(monitor.reporter.snapshot.value.lastSuccessAt).toEqual(expect.any(Number));
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('a successful delivery clears the previous failure', async () => {
+  const transport = jest
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error('down'))
+    .mockResolvedValueOnce(undefined);
+  const monitor = reporting({ transport });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(false);
+    expect(monitor.reporter.snapshot.value.lastFailure).toBe('transport');
+    expect(await monitor.reporter.flush()).toBe(true);
+    expect(monitor.reporter.snapshot.value).toMatchObject({
+      lastFailure: null,
+      failed: 1,
+      sent: 1,
+    });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+describe('createReporter lifecycle', () => {
+  function reporter(report: Partial<ProductionReportConfig> = {}, enabled = true) {
+    return createReporter(
+      {
+        endpoint: '/metrics',
+        interval: 60_000,
+        flushOnHide: false,
+        transport: () => {},
+        ...report,
+      },
+      enabled,
+      () => ({ ok: true }),
+    );
+  }
+
+  test('stop and destroy are no-ops once destroyed', () => {
+    const instance = reporter();
+
+    instance.start();
+    instance.destroy();
+
+    const destroyed = instance.snapshot.value;
+
+    instance.stop();
+    instance.destroy();
+    instance.start();
+
+    expect(instance.snapshot.value).toBe(destroyed);
+    expect(destroyed.status).toBe('destroyed');
+  });
+
+  test('is disabled when not enabled or without a report config', async () => {
+    const disabled = reporter({}, false);
+    const unconfigured = createReporter(undefined, true, () => ({}));
+
+    disabled.start();
+    unconfigured.start();
+
+    expect(disabled.snapshot.value.status).toBe('disabled');
+    expect(unconfigured.snapshot.value.status).toBe('disabled');
+    expect(await disabled.flush()).toBe(false);
+    expect(await unconfigured.flush()).toBe(false);
+
+    disabled.stop();
+    expect(disabled.snapshot.value.status).toBe('disabled');
+    disabled.destroy();
+    unconfigured.destroy();
+  });
+
+  test('a stop right after the transport resolves does not count the delivery as sent', async () => {
+    const holder: { stop?: () => void } = {};
+    const instance = reporter({
+      transport: () => {
+        // Stops after the transport settles but before the delivery is recorded as sent.
+        void (async () => {
+          await null;
+          await null;
+          holder.stop?.();
+        })();
+      },
+    });
+
+    holder.stop = () => instance.stop();
+
+    try {
+      instance.start();
+
+      expect(await instance.flush()).toBe(false);
+      expect(instance.snapshot.value).toMatchObject({
+        status: 'stopped',
+        sent: 0,
+        failed: 0,
+        cancelled: 1,
+      });
+    } finally {
+      instance.destroy();
+    }
+  });
+});
+
+describe('flushOnHide with the default transport', () => {
+  const page = new EventTarget();
+
+  test('records a non-OK hidden delivery as a transport failure', async () => {
+    const realFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: page });
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: jest.fn(async () => new Response(null, { status: 500 })),
+    });
+
+    const monitor = createMonitor({
+      collectors: [],
+      env: 'production',
+      report: { endpoint: '/metrics', interval: 60_000 },
+    });
+
+    try {
+      monitor.start();
+      page.dispatchEvent(new Event('pagehide'));
+      await new Promise((resolve) => realTimers.setTimeout(resolve, 0));
+
+      expect(monitor.reporter.snapshot.value).toMatchObject({
+        attempts: 1,
+        failed: 1,
+        lastFailure: 'transport',
+      });
+    } finally {
+      monitor.destroy();
+      Reflect.deleteProperty(globalThis, 'window');
 
       if (realFetch) {
         Object.defineProperty(globalThis, 'fetch', realFetch);

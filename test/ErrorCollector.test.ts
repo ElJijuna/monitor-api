@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import type { MonitorErrorDetails, MonitorErrorSource } from '../src/index';
 import { createMonitor } from '../src/index';
 
 const realTimers = {
@@ -209,4 +210,242 @@ test('ErrorCollector rejects invalid dedup windows', () => {
   for (const dedupWindow of [-1, NaN, Infinity]) {
     expect(() => createMonitor({ collectors: { errors: { dedupWindow } } })).toThrow(RangeError);
   }
+});
+
+test('ErrorCollector normalizes non-Error values into bounded details', () => {
+  const monitor = createMonitor({ collectors: { errors: { dedupWindow: 0 } } });
+
+  try {
+    const errorWithoutStack = new Error('no stack');
+
+    errorWithoutStack.name = '';
+    Reflect.deleteProperty(errorWithoutStack, 'stack');
+
+    monitor.errors.capture({ name: 'ApiError', message: 'bad gateway', stack: 'at fetch' });
+    monitor.errors.capture({ code: 42 });
+    monitor.errors.capture('x'.repeat(2_000));
+    monitor.errors.capture('');
+    monitor.errors.capture(errorWithoutStack);
+
+    expect(monitor.errors.snapshot.value.entries.map((entry) => entry.details)).toEqual([
+      { name: 'ApiError', message: 'bad gateway', stack: 'at fetch' },
+      { name: 'Error', message: 'Unknown error', stack: null },
+      { name: 'Error', message: 'x'.repeat(1_024), stack: null },
+      { name: 'Error', message: 'Unknown error', stack: null },
+      { name: 'Error', message: 'no stack', stack: null },
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector reads error events by message and ignores empty ones', () => {
+  const target = new EventTarget();
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+
+  const monitor = createMonitor({ collectors: { errors: true } });
+
+  try {
+    monitor.start();
+    monitor.start();
+    target.dispatchEvent(new Event('error'));
+    target.dispatchEvent(Object.assign(new Event('error'), { message: 'Script error.' }));
+
+    expect(monitor.errors.snapshot.value.entries.map((entry) => entry.details.message)).toEqual([
+      'Script error.',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector stays inert after destroy and when no window exists', () => {
+  const monitor = createMonitor({ collectors: { errors: true } });
+
+  monitor.start();
+  monitor.stop();
+  monitor.destroy();
+  monitor.destroy();
+  monitor.errors.capture(new Error('late'));
+
+  expect(monitor.errors.snapshot.value.totalErrors).toBe(0);
+
+  const target = new EventTarget();
+  const addEventListener = jest.spyOn(target, 'addEventListener');
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+  monitor.errors.start();
+
+  expect(addEventListener).not.toHaveBeenCalled();
+});
+
+test('ErrorCollector clears listener references when stopped without a window', () => {
+  const target = new EventTarget();
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+
+  const monitor = createMonitor({ collectors: { errors: true } });
+  const addEventListener = jest.spyOn(target, 'addEventListener');
+
+  try {
+    monitor.start();
+    Reflect.deleteProperty(globalThis, 'window');
+    monitor.stop();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+    monitor.start();
+
+    expect(addEventListener).toHaveBeenCalledTimes(4);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector does not deduplicate different sources or expired windows', () => {
+  jest.useFakeTimers();
+
+  const monitor = createMonitor({ collectors: { errors: { dedupWindow: 1_000 } } });
+
+  try {
+    monitor.errors.capture(new Error('same'));
+    monitor.errors.capture(new Error('same'), 'error');
+    jest.advanceTimersByTime(1_001);
+    monitor.errors.capture(new Error('same'), 'error');
+
+    expect(monitor.errors.snapshot.value.entries.map((entry) => entry.occurrences)).toEqual([
+      1, 1, 1,
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector drops an error when the sanitizer throws', () => {
+  const monitor = createMonitor({
+    collectors: {
+      errors: {
+        sanitize() {
+          throw new Error('sanitizer bug');
+        },
+      },
+    },
+  });
+  const notify = jest.fn();
+
+  try {
+    monitor.errors.snapshot.subscribe(notify);
+    monitor.errors.capture(new Error('token=secret'));
+
+    expect(monitor.errors.snapshot.value).toMatchObject({
+      totalErrors: 1,
+      droppedErrors: 1,
+      entries: [],
+    });
+    expect(monitor.errors.onError.value).toBeNull();
+    // Counters changed, so subscribers still hear about the dropped error.
+    expect(notify).toHaveBeenCalledTimes(1);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector passes the capture source to the sanitizer', () => {
+  const sanitize = jest.fn((details: MonitorErrorDetails, _source: MonitorErrorSource) => details);
+  const target = new EventTarget();
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+
+  const monitor = createMonitor({ collectors: { errors: { sanitize } } });
+
+  try {
+    monitor.start();
+    monitor.errors.capture(new Error('manual'));
+    monitor.errors.capture(new Error('explicit'), 'error');
+    target.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: 'rejected' }));
+
+    expect(sanitize.mock.calls.map(([, source]) => source)).toEqual([
+      'manual',
+      'error',
+      'unhandledrejection',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector clearLog empties entries and onError but keeps lifetime counters', () => {
+  const monitor = createMonitor({
+    collectors: { errors: { sanitize: (d) => (d.message === 'drop' ? null : d) } },
+  });
+
+  try {
+    monitor.errors.capture(new Error('kept'));
+    monitor.errors.capture(new Error('drop'));
+    monitor.errors.clearLog();
+
+    expect(monitor.errors.snapshot.value).toEqual({
+      entries: [],
+      totalErrors: 2,
+      droppedErrors: 1,
+    });
+    expect(monitor.errors.onError.value).toBeNull();
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector truncates long names and stacks', () => {
+  const monitor = createMonitor({ collectors: { errors: true } });
+
+  try {
+    monitor.errors.capture({ name: 'N'.repeat(500), message: 'long', stack: 's'.repeat(10_000) });
+
+    const details = monitor.errors.snapshot.value.entries[0]?.details;
+
+    expect(details?.name).toHaveLength(128);
+    expect(details?.stack).toHaveLength(8192);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector deduplication only merges with the most recent entry', () => {
+  const monitor = createMonitor({ collectors: { errors: { dedupWindow: 60_000 } } });
+
+  try {
+    monitor.errors.capture(new Error('A'));
+    monitor.errors.capture(new Error('B'));
+    monitor.errors.capture(new Error('A'));
+    monitor.errors.capture(new Error('A'));
+
+    expect(
+      monitor.errors.snapshot.value.entries.map(({ details, occurrences }) => [
+        details.message,
+        occurrences,
+      ]),
+    ).toEqual([
+      ['A', 1],
+      ['B', 1],
+      ['A', 2],
+    ]);
+    expect(monitor.errors.snapshot.value.totalErrors).toBe(4);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ErrorCollector destroy is idempotent at the collector level', () => {
+  const target = new EventTarget();
+  const removeEventListener = jest.spyOn(target, 'removeEventListener');
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: target });
+
+  const monitor = createMonitor({ collectors: { errors: true } });
+
+  monitor.start();
+  monitor.errors.destroy();
+  monitor.errors.destroy();
+
+  expect(removeEventListener).toHaveBeenCalledTimes(2);
+  monitor.destroy();
 });

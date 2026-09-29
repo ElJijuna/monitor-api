@@ -70,6 +70,7 @@
         "lint:fix": "eslint . --fix",
         "release": "semantic-release",
         "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+        "test:coverage": "npm test -- --coverage",
         "test:browser": "npm ci --prefix test/browser/react-19 --no-audit --no-fund && npm run build && playwright test",
         "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
         "prepublishOnly": "npm run check && npm run build",

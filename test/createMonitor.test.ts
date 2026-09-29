@@ -2,10 +2,21 @@ import { jest } from '@jest/globals';
 import type { MonitorSnapshot, ProductionReportRequest } from '../src/core/types';
 import { createMonitor, emitMonitorEvent } from '../src/index';
 
+const realTimers = {
+  clearInterval: globalThis.clearInterval,
+  clearTimeout: globalThis.clearTimeout,
+  setInterval: globalThis.setInterval,
+  setTimeout: globalThis.setTimeout,
+};
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, 'window');
   jest.useRealTimers();
   jest.restoreAllMocks();
+  globalThis.clearInterval = realTimers.clearInterval;
+  globalThis.clearTimeout = realTimers.clearTimeout;
+  globalThis.setInterval = realTimers.setInterval;
+  globalThis.setTimeout = realTimers.setTimeout;
 });
 
 test('createMonitor exposes a combined snapshot and subscription API', () => {
@@ -573,4 +584,89 @@ test('a monitor declared with using is destroyed at the end of its block', () =>
   }
 
   expect(reporter.snapshot.value.status).toBe('destroyed');
+});
+
+test('resource timing excludes the report endpoint by exact match when location is unavailable', () => {
+  const observers: Array<(list: { getEntries(): unknown[] }) => void> = [];
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+  Object.defineProperty(globalThis, 'PerformanceObserver', {
+    configurable: true,
+    value: class {
+      constructor(callback: (list: { getEntries(): unknown[] }) => void) {
+        observers.push(callback);
+      }
+
+      observe(): void {}
+
+      disconnect(): void {}
+    },
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: { resources: true },
+    report: { endpoint: '/metrics', interval: 60_000, transport: () => {}, flushOnHide: false },
+  });
+  const resource = (name: string) => ({
+    name,
+    initiatorType: 'img',
+    duration: 10,
+    responseEnd: 20,
+    transferSize: 0,
+    encodedBodySize: 0,
+    decodedBodySize: 0,
+  });
+
+  try {
+    monitor.start();
+    observers[0]?.({ getEntries: () => [resource('/metrics'), resource('/api/data')] });
+
+    expect(monitor.resources.snapshot.value.entries.map((entry) => entry.url)).toEqual([
+      '/api/data',
+    ]);
+  } finally {
+    monitor.destroy();
+    Reflect.deleteProperty(globalThis, 'PerformanceObserver');
+  }
+});
+
+test('the default report sends null memory and web vitals before any measurement', async () => {
+  const transport = jest.fn<(request: ProductionReportRequest) => void>();
+  const monitor = createMonitor({
+    env: 'production',
+    report: { endpoint: '/metrics', interval: 60_000, transport, flushOnHide: false },
+  });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(true);
+    expect(transport.mock.calls[0]?.[0].payload).toMatchObject({
+      performance: { memoryPercent: null },
+      webVitals: { cls: null, fcp: null, inp: null, lcp: null, ttfb: null },
+    });
+    expect(transport.mock.calls[0]?.[0].payload).not.toHaveProperty('resources');
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('the monitor snapshot updates when any enabled collector changes', () => {
+  const monitor = createMonitor({ collectors: ['events', 'errors'] });
+  const notify = jest.fn();
+
+  try {
+    monitor.subscribe(notify);
+    notify.mockClear();
+    monitor.events.emit('clicked');
+    monitor.errors.capture(new Error('boom'));
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(monitor.getSnapshot()).toMatchObject({
+      events: { byLabel: { clicked: 1 } },
+      errors: { totalErrors: 1 },
+    });
+  } finally {
+    monitor.destroy();
+  }
 });

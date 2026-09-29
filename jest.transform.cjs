@@ -1,15 +1,16 @@
-const ts = require('typescript');
+const { transformSync } = require('esbuild');
 
 module.exports = {
   process(sourceText, sourcePath) {
-    const output = ts.transpileModule(sourceText, {
-      compilerOptions: {
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2020,
-      },
-      fileName: sourcePath,
+    // ES2022 keeps native #private fields and exact source maps keep coverage on the .ts lines.
+    const { code, map } = transformSync(sourceText, {
+      format: 'esm',
+      loader: sourcePath.endsWith('.tsx') ? 'tsx' : 'ts',
+      sourcefile: sourcePath,
+      sourcemap: 'external',
+      target: 'es2022',
     });
 
-    return { code: output.outputText };
+    return { code, map };
   },
 };

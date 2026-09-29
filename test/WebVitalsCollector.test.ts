@@ -408,3 +408,192 @@ describe('attribution', () => {
     }
   });
 });
+
+describe('attribution edge cases', () => {
+  test('fills missing optional attribution fields with null and skips absent attribution', async () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    const monitor = createMonitor({
+      collectors: { webVitals: { attribution: true, reportAllChanges: false } },
+    });
+
+    try {
+      monitor.start();
+      await loadAttributionBuild();
+      attributionCallbacks.get('INP')?.(
+        withAttribution(metric('INP', 100), {
+          interactionTarget: '',
+          inputDelay: 1,
+          processingDuration: 2,
+          presentationDelay: 3,
+        }),
+      );
+      attributionCallbacks.get('CLS')?.(withAttribution(metric('CLS', 0.1), {}));
+      attributionCallbacks.get('FCP')?.(
+        withAttribution(metric('FCP', 800), { timeToFirstByte: 100, firstByteToFCP: 700 }),
+      );
+      attributionCallbacks.get('LCP')?.(metric('LCP', 1200));
+      attributionCallbacks.get('TTFB')?.(
+        withAttribution({ ...metric('TTFB', 90), name: 'FID' } as unknown as MetricType, {}),
+      );
+
+      const snapshot = monitor.webVitals.snapshot.value;
+
+      expect(snapshot.inp?.attribution).toMatchObject({
+        interactionTarget: null,
+        interactionType: null,
+        interactionTime: null,
+        loadState: null,
+        longestScript: null,
+      });
+      expect(snapshot.cls?.attribution).toEqual({
+        largestShiftTarget: null,
+        largestShiftTime: null,
+        largestShiftValue: null,
+        loadState: null,
+      });
+      expect(snapshot.fcp?.attribution).toMatchObject({ loadState: null });
+      expect(snapshot.lcp).not.toHaveProperty('attribution');
+      expect(snapshot.entries[snapshot.entries.length - 1]).not.toHaveProperty('attribution');
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('a failed attribution build registration is retried on the next start', async () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+    (webVitalsAttribution.onCLS as jest.Mock).mockImplementationOnce(() => {
+      throw new Error('chunk failed');
+    });
+
+    const monitor = createMonitor({
+      collectors: { webVitals: { attribution: true, reportAllChanges: true } },
+    });
+
+    try {
+      monitor.start();
+      await loadAttributionBuild();
+      expect(webVitalsAttribution.onCLS).toHaveBeenCalledTimes(1);
+      expect(webVitalsAttribution.onLCP).not.toHaveBeenCalled();
+
+      monitor.stop();
+      monitor.start();
+      await loadAttributionBuild();
+
+      expect(webVitalsAttribution.onCLS).toHaveBeenCalledTimes(2);
+      expect(webVitalsAttribution.onLCP).toHaveBeenCalledWith(expect.any(Function), {
+        reportAllChanges: true,
+      });
+    } finally {
+      monitor.destroy();
+    }
+  });
+});
+
+test('WebVitalsCollector clearLog resets metrics and stays inert after destroy', () => {
+  const monitor = createMonitor({ collectors: { webVitals: { reportAllChanges: false } } });
+
+  monitor.start();
+  expect(webVitals.onLCP).not.toHaveBeenCalled();
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  monitor.start();
+  callbacks.get('LCP')?.(metric('LCP', 1000));
+  expect(monitor.webVitals.snapshot.value.lcp?.value).toBe(1000);
+
+  monitor.webVitals.clearLog();
+  expect(monitor.webVitals.snapshot.value.lcp).toBeNull();
+  expect(monitor.webVitals.snapshot.value.entries).toEqual([]);
+  expect(monitor.webVitals.onMetric.value).toBeNull();
+
+  monitor.destroy();
+  monitor.webVitals.destroy();
+  monitor.webVitals.start();
+  callbacks.get('LCP')?.(metric('LCP', 2000));
+
+  expect(monitor.webVitals.snapshot.value.lcp).toBeNull();
+});
+
+test('the default report summarizes CLS, FCP and TTFB attribution and memory usage', async () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  Object.defineProperty(globalThis.performance, 'memory', {
+    configurable: true,
+    value: {
+      usedJSHeapSize: 25 * 1_048_576,
+      totalJSHeapSize: 50 * 1_048_576,
+      jsHeapSizeLimit: 100 * 1_048_576,
+    },
+  });
+
+  const transport = jest.fn<(request: { payload: unknown }) => void>();
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: {
+      performance: true,
+      // The attribution mocks keep the callback of the channel registered last (all changes).
+      webVitals: { attribution: true, reportAllChanges: true },
+    },
+    report: { endpoint: '/metrics', interval: 60_000, transport, flushOnHide: false },
+  });
+
+  try {
+    monitor.start();
+    await loadAttributionBuild();
+    attributionCallbacks.get('CLS')?.(
+      withAttribution(metric('CLS', 0.2), {
+        largestShiftTarget: '#banner',
+        largestShiftTime: 900,
+        largestShiftValue: 0.15,
+        loadState: 'complete',
+      }),
+    );
+    attributionCallbacks.get('FCP')?.(
+      withAttribution(metric('FCP', 900), {
+        timeToFirstByte: 200,
+        firstByteToFCP: 700,
+        loadState: 'dom-interactive',
+      }),
+    );
+    attributionCallbacks.get('TTFB')?.(
+      withAttribution(metric('TTFB', 200), {
+        waitingDuration: 10,
+        cacheDuration: 0,
+        dnsDuration: 20,
+        connectionDuration: 30,
+        requestDuration: 140,
+      }),
+    );
+
+    expect(await monitor.reporter.flush()).toBe(true);
+
+    const request = transport.mock.calls[0]?.[0] as { body: string; payload: unknown };
+
+    expect(request.payload).toMatchObject({
+      performance: { memoryPercent: 25 },
+      webVitals: {
+        cls: {
+          value: 0.2,
+          attribution: { largestShiftValue: 0.15, largestShiftTime: 900, loadState: 'complete' },
+        },
+        fcp: {
+          attribution: { timeToFirstByte: 200, firstByteToFCP: 700, loadState: 'dom-interactive' },
+        },
+        ttfb: {
+          attribution: {
+            waitingDuration: 10,
+            cacheDuration: 0,
+            dnsDuration: 20,
+            connectionDuration: 30,
+            requestDuration: 140,
+          },
+        },
+        inp: null,
+        lcp: null,
+      },
+    });
+    expect(request.body).not.toContain('#banner');
+  } finally {
+    monitor.destroy();
+    Reflect.deleteProperty(globalThis.performance, 'memory');
+  }
+});

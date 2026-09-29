@@ -3,7 +3,18 @@ import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import SSignal from 'ssignal';
 import { createMonitor } from '../src/index';
-import { shallowEqual, useMonitor, useNetwork, useSignal } from '../src/react';
+import {
+  shallowEqual,
+  useErrors,
+  useEvents,
+  useMonitor,
+  useNetwork,
+  usePerformance,
+  useReact,
+  useResources,
+  useSignal,
+  useWebVitals,
+} from '../src/react';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -211,4 +222,38 @@ test('shallowEqual compares one level deep', () => {
   expect(shallowEqual({ a: { nested: 1 } }, { a: { nested: 1 } })).toBe(false);
   expect(shallowEqual([1], { 0: 1 })).toBe(false);
   expect(shallowEqual(null, {})).toBe(false);
+});
+
+test('each collector hook reads its own collector snapshot', async () => {
+  const monitor = createMonitor({ collectors: [] });
+  const seen = jest.fn();
+
+  function View() {
+    seen({
+      errors: useErrors(monitor),
+      events: useEvents(monitor),
+      performance: usePerformance(monitor),
+      react: useReact(monitor),
+      resources: useResources(monitor),
+      webVitals: useWebVitals(monitor),
+    });
+
+    return null;
+  }
+
+  const renderer = await mount(createElement(View));
+
+  try {
+    expect(seen).toHaveBeenLastCalledWith({
+      errors: monitor.errors.snapshot.value,
+      events: monitor.events.snapshot.value,
+      performance: monitor.performance.snapshot.value,
+      react: monitor.react.snapshot.value,
+      resources: monitor.resources.snapshot.value,
+      webVitals: monitor.webVitals.snapshot.value,
+    });
+  } finally {
+    await act(async () => renderer.unmount());
+    monitor.destroy();
+  }
 });
