@@ -6,12 +6,15 @@ export type {
   CLSAttributionSummary,
   CollectorName,
   ComponentStats,
+  // Device
+  DeviceSnapshot,
   ErrorCollectorConfig,
   ErrorSnapshot,
   EventCollectorConfig,
   // Events
   EventSnapshot,
   FCPAttributionSummary,
+  IDeviceCollector,
   IErrorCollector,
   IEventCollector,
   INetworkCollector,

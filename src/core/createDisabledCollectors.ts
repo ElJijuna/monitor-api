@@ -1,6 +1,8 @@
 import SSignal from 'ssignal';
+import { emptyDeviceSnapshot } from '../collectors/DeviceCollector';
 import { emptyResourceSnapshot } from '../collectors/ResourceCollector';
 import type {
+  IDeviceCollector,
   IErrorCollector,
   IEventCollector,
   INetworkCollector,
@@ -147,6 +149,15 @@ export function createDisabledWebVitalsCollector(): IWebVitalsCollector {
     snapshot: new SSignal(snapshot),
     onMetric: new SSignal<WebVitalMetric | null>(null),
     clearLog: noop,
+    start: noop,
+    stop: noop,
+    destroy: noop,
+  };
+}
+
+export function createDisabledDeviceCollector(): IDeviceCollector {
+  return {
+    snapshot: new SSignal(emptyDeviceSnapshot()),
     start: noop,
     stop: noop,
     destroy: noop,

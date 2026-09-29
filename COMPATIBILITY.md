@@ -13,6 +13,7 @@ three browser engines through Playwright on every pull request.
 | Web Vitals attribution | Tested | Feature detected | Feature detected | Fields the engine cannot measure are `null` |
 | FPS | Tested | Tested | Tested | Requires `requestAnimationFrame` |
 | JS heap memory | Supported | `null` | `null` | Chromium-only `performance.memory` |
+| Logical processor count | Supported | Supported | Supported | `null` where `navigator.hardwareConcurrency` is absent |
 | Long Tasks | Feature detected | Feature detected | Feature detected | Empty aggregate when unsupported |
 | React commit collection | Feature detected | Feature detected | Feature detected | Requires the React DevTools global hook |
 | Server-side import/start | Tested in Node | Tested in Node | Tested in Node | Browser collectors no-op |

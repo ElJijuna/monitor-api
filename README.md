@@ -14,9 +14,9 @@ Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, 
 ## Features
 
 - **Signal-based** — subscribe to exactly what you need, no polling
-- **7 collectors** — Performance, Network, React, Events, Web Vitals, optional Errors and Resources
+- **8 collectors** — Performance, Network, React, Events, Web Vitals, Device, optional Errors and Resources
 - **Web Vitals** — CLS, FCP, INP, LCP, and TTFB via `web-vitals`
-- **React integration** — selector-aware `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useResources`, `useWebVitals`
+- **React integration** — selector-aware `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useResources`, `useWebVitals`, `useDevice`
 - **Zero config** — works out of the box, tree-shakeable
 - **SSR safe** — browser collectors no-op outside the browser
 - **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
@@ -634,6 +634,31 @@ after `stop()`, a new `start()` records only resources that finish after it.
 
 ---
 
+### DeviceCollector
+
+Reads static capabilities of the device running the page, useful for segmenting
+the other metrics by device class. It is enabled by default and reads its values
+once on `start()`.
+
+```ts
+monitor.start()
+
+const { hardwareConcurrency } = monitor.device.snapshot.value
+
+console.log('Logical processors:', hardwareConcurrency ?? 'n/a')
+```
+
+```ts
+interface DeviceSnapshot {
+  hardwareConcurrency: number | null // navigator.hardwareConcurrency
+}
+```
+
+Values are `null` before `start()`, outside browsers, and where the browser does
+not expose them. `stop()` keeps the values already read.
+
+---
+
 ## Unified snapshot
 
 Subscribe to all collectors at once:
@@ -648,6 +673,7 @@ monitor.subscribe((snap) => {
   console.log('  Custom events:', snap.events.entries.length)
   console.log('  Errors:', snap.errors.totalErrors)
   console.log('  Assets:', snap.resources.totals.count)
+  console.log('  CPU cores:', snap.device.hardwareConcurrency)
 })
 
 // Or read synchronously
@@ -660,7 +686,7 @@ const snap = monitor.getSnapshot()
 
 ```tsx
 import { createMonitor } from 'monitor-api'
-import { useSignal, usePerformance, useNetwork, useReact, useEvents, useErrors, useResources, useWebVitals } from 'monitor-api/react'
+import { useSignal, usePerformance, useNetwork, useReact, useEvents, useErrors, useResources, useWebVitals, useDevice } from 'monitor-api/react'
 
 const monitor = createMonitor()
 monitor.start()
@@ -740,6 +766,11 @@ function ErrorPanel() {
       </ul>
     </div>
   )
+}
+
+function DeviceBadge() {
+  const cores = useDevice(monitor, (snap) => snap.hardwareConcurrency)
+  return <span>{cores ?? 'n/a'} cores</span>
 }
 ```
 
@@ -830,7 +861,8 @@ start.
 Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
 snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;
 the five-second network aggregate; React commit counts; the retained custom-event
-count; retained error counters; and Web Vital values, deltas, and ratings. It
+count; retained error counters; Web Vital values, deltas, and ratings; and the
+logical processor count. It
 does not send request URLs, error messages or stacks, histories, event labels or
 data, component names, Web Vital IDs, or navigation types. The reporter endpoint
 is also excluded from NetworkCollector, while any configured network filter
@@ -896,6 +928,7 @@ createMonitor({
       attribution: false,      // default false; diagnostic breakdown per metric
       softNavigations: false,  // default false; report metrics per SPA route change
     },
+    device: true,
   },
 
   maxHistory: 60,   // data points per metric

@@ -29,8 +29,9 @@ Items are grouped by area and ordered by priority within each group.
 - [ ] **Compute Pressure API** (`new PressureObserver(cb).observe('cpu')`): CPU
   pressure state (`nominal`, `fair`, `serious`, `critical`). Chromium 125+.
   Useful for correlating FPS drops and long tasks with system load.
-- [ ] **`navigator.hardwareConcurrency`**: logical CPU core count. Supported by all
-  engines.
+- [x] **`navigator.hardwareConcurrency`**: logical CPU core count, exposed by the
+  new `DeviceCollector` as `snapshot.device.hardwareConcurrency` and sent by the
+  default reporter.
 - [ ] **Battery Status API** (`navigator.getBattery()`): charge level and charging
   state. Chromium only.
 
@@ -81,8 +82,8 @@ those metrics do not expose.
 
 1. Memory: add `measureUserAgentSpecificMemory()` with a fallback to
    `performance.memory`, and add `deviceMemory` as context.
-2. A new device and network collector covering `deviceMemory`,
-   `hardwareConcurrency`, `navigator.connection`, online status, and
+2. Extend `DeviceCollector` (which already reports `hardwareConcurrency`) with
+   `deviceMemory`, `navigator.connection`, online status, and
    `storage.estimate()`. These APIs are cheap and add context to every other
    metric.
 3. `navigation` timing and the Reporting API.

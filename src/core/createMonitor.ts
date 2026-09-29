@@ -1,4 +1,5 @@
 import { computed } from 'ssignal';
+import { DeviceCollector } from '../collectors/DeviceCollector';
 import { ErrorCollector } from '../collectors/ErrorCollector';
 import { EventCollector } from '../collectors/EventCollector';
 import { NetworkCollector } from '../collectors/NetworkCollector';
@@ -7,6 +8,7 @@ import { ReactCollector } from '../collectors/ReactCollector';
 import { ResourceCollector } from '../collectors/ResourceCollector';
 import { WebVitalsCollector } from '../collectors/WebVitalsCollector';
 import {
+  createDisabledDeviceCollector,
   createDisabledErrorCollector,
   createDisabledEventCollector,
   createDisabledNetworkCollector,
@@ -140,6 +142,9 @@ function createDefaultReportPayload(snap: MonitorSnapshot, includeResources: boo
         requestDuration: a.requestDuration,
       })),
     },
+    device: {
+      hardwareConcurrency: snap.device.hardwareConcurrency,
+    },
   };
 }
 
@@ -238,6 +243,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     ? resolveCollector('resources', config, resourcesConfig)
     : false;
   const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig);
+  const deviceCfg = resolveCollector('device', config, true);
   const active = {
     performance: sampledIn && perfCfg !== false,
     network: sampledIn && netCfg !== false,
@@ -246,6 +252,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     errors: sampledIn && errorsCfg !== false,
     resources: sampledIn && resourcesCfg !== false,
     webVitals: sampledIn && webVitalsCfg !== false,
+    device: sampledIn && deviceCfg !== false,
   };
   const performance =
     active.performance && perfCfg
@@ -269,6 +276,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     active.webVitals && webVitalsCfg
       ? new WebVitalsCollector(webVitalsCfg)
       : createDisabledWebVitalsCollector();
+  const device = active.device ? new DeviceCollector() : createDisabledDeviceCollector();
   const snapshotSources = [
     ...(active.performance ? [performance.snapshot] : []),
     ...(active.network ? [network.snapshot] : []),
@@ -277,6 +285,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     ...(active.errors ? [errors.snapshot] : []),
     ...(active.resources ? [resources.snapshot] : []),
     ...(active.webVitals ? [webVitals.snapshot] : []),
+    ...(active.device ? [device.snapshot] : []),
   ];
   const signal = computed(
     snapshotSources,
@@ -289,6 +298,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       errors: errors.snapshot.value,
       resources: resources.snapshot.value,
       webVitals: webVitals.snapshot.value,
+      device: device.snapshot.value,
     }),
   );
 
@@ -335,6 +345,10 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       webVitals.start();
     }
 
+    if (active.device) {
+      device.start();
+    }
+
     reporter.start();
   }
 
@@ -346,6 +360,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     errors.stop();
     resources.stop();
     webVitals.stop();
+    device.stop();
     reporter.stop();
   }
 
@@ -363,6 +378,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     errors.destroy();
     resources.destroy();
     webVitals.destroy();
+    device.destroy();
     signal.dispose();
   }
 
@@ -375,6 +391,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     errors,
     resources,
     webVitals,
+    device,
     signal,
     getSnapshot: () => signal.value,
     subscribe: (cb) => signal.subscribe(cb),

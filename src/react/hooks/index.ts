@@ -1,4 +1,5 @@
 export type { SnapshotHook } from './snapshotHook';
+export { useDevice } from './useDevice';
 export { useErrors } from './useErrors';
 export { useEvents } from './useEvents';
 export { useMonitor } from './useMonitor';

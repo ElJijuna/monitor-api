@@ -15,6 +15,7 @@ third-party analytics endpoint.
 | Events | Application labels and serializable custom payloads | Retained event count only |
 | Errors | Message, stack, source location, type, and occurrence count | Error counters only |
 | Resources (opt-in) | Asset URLs, types, durations, sizes, cache state, status, and origin | Totals and per-type aggregates only |
+| Device | Logical processor count (`navigator.hardwareConcurrency`) | Logical processor count |
 | Web Vitals | Values, deltas, ratings, IDs, navigation types, navigation IDs, the URL of the page view each metric belongs to (including SPA routes with `softNavigations`), and timestamps; with `attribution`, also CSS selectors of the LCP, INP, and CLS elements, the LCP resource URL, the longest script's URL and invoker, and phase timings | Values, deltas, and ratings; with `attribution`, phase timings, interaction type, load state, and script invoker type, but no selectors, URLs, or invokers |
 
 All histories are held in JavaScript memory and bounded by `maxHistory`. Calling

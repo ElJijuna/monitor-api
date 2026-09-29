@@ -1,4 +1,5 @@
 import type SSignal from 'ssignal';
+import type { DeviceSnapshot, IDeviceCollector } from './device';
 import type { ErrorCollectorConfig, ErrorSnapshot, IErrorCollector } from './errors';
 import type { EventCollectorConfig, EventSnapshot, IEventCollector } from './events';
 import type { INetworkCollector, NetworkCollectorConfig, NetworkSnapshot } from './network';
@@ -29,6 +30,8 @@ export interface MonitorSnapshot {
   resources: ResourceSnapshot;
   /** Standard Web Vitals metrics collected from the browser. */
   webVitals: WebVitalsSnapshot;
+  /** Static device capabilities such as the logical processor count. */
+  device: DeviceSnapshot;
 }
 
 /** Serialized report handed to a custom production transport. */
@@ -133,7 +136,8 @@ export type CollectorName =
   | 'events'
   | 'webVitals'
   | 'errors'
-  | 'resources';
+  | 'resources'
+  | 'device';
 
 /** Options used when creating a monitor instance. */
 export interface MonitorConfig {
@@ -153,6 +157,7 @@ export interface MonitorConfig {
         errors?: boolean | Partial<ErrorCollectorConfig>;
         resources?: boolean | Partial<ResourceCollectorConfig>;
         webVitals?: boolean | Partial<WebVitalsCollectorConfig>;
+        device?: boolean;
       };
   /** Per-monitor sampling probability from 0 to 1. Defaults to 1. */
   sampleRate?: number;
@@ -184,6 +189,8 @@ export interface Monitor {
   resources: IResourceCollector;
   /** Web Vitals collector API. */
   webVitals: IWebVitalsCollector;
+  /** Device capabilities collector API. */
+  device: IDeviceCollector;
   /** Reactive signal containing the combined monitor snapshot. */
   signal: SSignal<MonitorSnapshot>;
   /** Returns the latest combined snapshot synchronously. */

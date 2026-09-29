@@ -651,6 +651,39 @@ test('the default report sends null memory and web vitals before any measurement
   }
 });
 
+test('the default report includes the logical processor count', async () => {
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const transport = jest.fn<(request: ProductionReportRequest) => void>();
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { hardwareConcurrency: 6 },
+  });
+
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: ['device'],
+    report: { endpoint: '/metrics', interval: 60_000, transport, flushOnHide: false },
+  });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(true);
+    expect(transport.mock.calls[0]?.[0].payload).toMatchObject({
+      device: { hardwareConcurrency: 6 },
+    });
+  } finally {
+    monitor.destroy();
+
+    if (originalNavigator) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigator);
+    } else {
+      Reflect.deleteProperty(globalThis, 'navigator');
+    }
+  }
+});
+
 test('the monitor snapshot updates when any enabled collector changes', () => {
   const monitor = createMonitor({ collectors: ['events', 'errors'] });
   const notify = jest.fn();

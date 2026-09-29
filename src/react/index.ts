@@ -2,6 +2,7 @@ export {
   type EqualityFn,
   type SnapshotHook,
   shallowEqual,
+  useDevice,
   useErrors,
   useEvents,
   useMonitor,
