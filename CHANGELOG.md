@@ -1,3 +1,25 @@
+# [1.6.0](https://github.com/ElJijuna/monitor-api/compare/v1.5.0...v1.6.0) (2026-09-29)
+
+
+### Bug Fixes
+
+* do not count a completed delivery as cancelled when stopped while recording it ([5be5528](https://github.com/ElJijuna/monitor-api/commit/5be55281621d5759420dd131c0b62ba4ab98bf99))
+
+
+### Features
+
+* add Long Animation Frames with script attribution ([59a0a4d](https://github.com/ElJijuna/monitor-api/commit/59a0a4db538e7a57d6f90eeea16646ab8774bb65))
+* update ReactCollector to use SSignal for slowThreshold and enhance snapshot computation ([c0e393a](https://github.com/ElJijuna/monitor-api/commit/c0e393a4df494714742946d23837a0f2cc973c6a))
+* web-vitals report metrics per soft navigation with navigation ids and URLs ([5ff05cf](https://github.com/ElJijuna/monitor-api/commit/5ff05cf2c728044ff31df22beb84d1e7d2d182bc))
+
+
+### Performance Improvements
+
+* cover network, errors and reporter paths and report sample spread ([411741d](https://github.com/ElJijuna/monitor-api/commit/411741d9fa2be15a55a9ac024527764a8c5267b7))
+* decide report and event size limits from string length before encoding ([1ee4a33](https://github.com/ElJijuna/monitor-api/commit/1ee4a33aa96feb3a80288c9812c217414d8afe8b))
+* keep 5 s window totals in a time-ordered queue instead of rescanning buckets ([1540a52](https://github.com/ElJijuna/monitor-api/commit/1540a527ccd4e01305d99f2dce02562971e9a780))
+* react,events update component and label statistics from history changes instead of recomputing them ([87efa54](https://github.com/ElJijuna/monitor-api/commit/87efa54786957ba443e88d65d7f0eda45de544ad))
+
 # [1.5.0](https://github.com/ElJijuna/monitor-api/compare/v1.4.0...v1.5.0) (2026-09-29)
 
 
