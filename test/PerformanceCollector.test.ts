@@ -310,6 +310,52 @@ test('PerformanceCollector pauses FPS while hidden and resets the baseline on vi
   }
 });
 
+test('PerformanceCollector pauses memory sampling while hidden', () => {
+  const browser = installPerformanceBrowser();
+  const { document, listeners } = installDocument('hidden');
+
+  Object.defineProperty(globalThis.performance, 'memory', {
+    configurable: true,
+    value: {
+      usedJSHeapSize: 10 * 1_048_576,
+      totalJSHeapSize: 20 * 1_048_576,
+      jsHeapSizeLimit: 50 * 1_048_576,
+    },
+  });
+
+  try {
+    const monitor = createMonitor({ collectors: { performance: true } });
+
+    monitor.start();
+    jest.advanceTimersByTime(4_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([]);
+
+    document.visibilityState = 'visible';
+    listeners.get('visibilitychange')?.();
+    listeners.get('visibilitychange')?.();
+    jest.advanceTimersByTime(2_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([20]);
+
+    document.visibilityState = 'hidden';
+    listeners.get('visibilitychange')?.();
+    jest.advanceTimersByTime(4_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([20]);
+
+    document.visibilityState = 'visible';
+    listeners.get('visibilitychange')?.();
+    jest.advanceTimersByTime(2_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([20, 20]);
+
+    monitor.stop();
+    jest.advanceTimersByTime(2_000);
+    expect(monitor.performance.memoryHistory.value).toEqual([20, 20]);
+
+    monitor.destroy();
+  } finally {
+    browser.restore();
+  }
+});
+
 test('PerformanceCollector ignores memory ticks after stop and when memory is unavailable', () => {
   const browser = installPerformanceBrowser();
 

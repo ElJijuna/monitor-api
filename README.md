@@ -139,6 +139,10 @@ collectors you need, and use `report.transform` to send a compact payload.
 
 Captures FPS, JS heap memory, Long Tasks, Long Animation Frames (LoAF), and Cumulative Layout Shift (CLS).
 
+FPS and memory are sampled only while the page is visible: memory is read every two seconds, and both
+samplers pause while `document.visibilityState` is `hidden`, so `fpsHistory` and `memoryHistory` reflect
+visible time only.
+
 ```ts
 monitor.start()
 

@@ -41,6 +41,10 @@ const emptyLongAnimationFrames = (): LongAnimationFrameInfo => ({
   entries: [],
 });
 
+function isHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
 function boundedString(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value.slice(0, MAX_LOAF_STRING) : null;
 }
@@ -192,10 +196,7 @@ export class PerformanceCollector implements IPerformanceCollector {
       this.#rafId = null;
     }
 
-    if (this.#memoryInterval !== null) {
-      clearInterval(this.#memoryInterval);
-      this.#memoryInterval = null;
-    }
+    this.#pauseMemory();
 
     this.#longTaskObserver?.disconnect();
     this.#clsObserver?.disconnect();
@@ -238,7 +239,7 @@ export class PerformanceCollector implements IPerformanceCollector {
         return;
       }
 
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      if (isHidden()) {
         this.#lastFpsTime = 0;
         this.#frameCount = 0;
         this.#rafId = requestAnimationFrame(loop);
@@ -281,9 +282,20 @@ export class PerformanceCollector implements IPerformanceCollector {
   #onVisibilityChange = (): void => {
     this.#lastFpsTime = 0;
     this.#frameCount = 0;
+
+    if (isHidden()) {
+      this.#pauseMemory();
+    } else {
+      this.#startMemory();
+    }
   };
 
+  /** Samples memory every two seconds while the page is visible; hidden time is not recorded. */
   #startMemory(): void {
+    if (this.#memoryInterval !== null || isHidden()) {
+      return;
+    }
+
     const update = () => {
       if (!this.#started) {
         return;
@@ -302,6 +314,13 @@ export class PerformanceCollector implements IPerformanceCollector {
     };
 
     this.#memoryInterval = setInterval(update, 2000);
+  }
+
+  #pauseMemory(): void {
+    if (this.#memoryInterval !== null) {
+      clearInterval(this.#memoryInterval);
+      this.#memoryInterval = null;
+    }
   }
 
   #startLongTasks(): void {
