@@ -1191,3 +1191,135 @@ test('ReactCollector start is a no-op without a window', () => {
     monitor.destroy();
   }
 });
+
+describe('incremental statistics', () => {
+  interface Entry {
+    component: string;
+    duration: number;
+    timestamp: number;
+    type: string;
+  }
+
+  /** Recomputes the statistics from scratch, in integer tenths of a millisecond. */
+  function expectedStats(entries: Entry[]) {
+    const totals = new Map<string, { renders: number; tenths: number; lastRender: number }>();
+
+    for (const entry of entries) {
+      if (entry.type === 'unmount') {
+        continue;
+      }
+
+      const current = totals.get(entry.component);
+
+      totals.set(entry.component, {
+        renders: (current?.renders ?? 0) + 1,
+        tenths: (current?.tenths ?? 0) + Math.round(entry.duration * 10),
+        lastRender: entry.timestamp,
+      });
+    }
+
+    return Object.fromEntries(
+      [...totals].map(([name, { renders, tenths, lastRender }]) => [
+        name,
+        {
+          renders,
+          totalDuration: tenths / 10,
+          avgDuration: Math.round(tenths / renders) / 10,
+          lastRender,
+        },
+      ]),
+    );
+  }
+
+  test('components a commit does not touch keep the same stats object', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    function Stable() {}
+
+    function Busy() {}
+
+    const monitor = createMonitor({ collectors: { react: true } });
+
+    try {
+      monitor.start();
+      commit(Stable, 2);
+      commit(Busy, 1);
+
+      const before = monitor.react.snapshot.value.byComponent;
+
+      commit(Busy, 3);
+
+      const after = monitor.react.snapshot.value.byComponent;
+
+      expect(after).not.toBe(before);
+      expect(after.Stable).toBe(before.Stable);
+      expect(after.Busy).toEqual({
+        renders: 2,
+        totalDuration: 4,
+        avgDuration: 2,
+        lastRender: expect.any(Number),
+      });
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('byComponent and slowComponents match a full recomputation after every change', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+    jest.useFakeTimers({ now: 0 });
+
+    const types = ['Header', 'List', 'Row', 'constructor', 'Footer'].map((name) =>
+      Object.defineProperty(function Component() {}, 'name', { value: name }),
+    );
+    const monitor = createMonitor({ maxHistory: 7, collectors: { react: { slowThreshold: 3 } } });
+
+    let threshold = 3;
+    let seed = 42;
+
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+
+      return seed / 2_147_483_648;
+    };
+    const pick = <T>(items: T[]) => items[Math.floor(random() * items.length)] as T;
+
+    try {
+      monitor.start();
+
+      for (let step = 0; step < 400; step += 1) {
+        jest.advanceTimersByTime(1 + Math.floor(random() * 5));
+
+        const action = random();
+
+        if (action < 0.03) {
+          monitor.react.clearLog();
+        } else if (action < 0.08) {
+          threshold = Math.floor(random() * 6);
+          monitor.react.setSlowThreshold(threshold);
+        } else if (action < 0.2) {
+          unmount(fiberFor(pick(types)));
+        } else {
+          // One to twelve sibling fibers, sometimes more than maxHistory, with 0.0–5.0 ms each.
+          const count = 1 + Math.floor(random() * 12);
+          const fibers = Array.from({ length: count }, () =>
+            fiberFor(pick(types), Math.round(random() * 50) / 10),
+          );
+
+          fibers.forEach((fiber, index) => {
+            fiber.sibling = fibers[index + 1] ?? null;
+          });
+          commitRoot(fibers[0] as TestFiber);
+        }
+
+        const { entries, byComponent, slowComponents } = monitor.react.snapshot.value;
+
+        expect(byComponent).toEqual(expectedStats(entries));
+        expect(slowComponents).toEqual(
+          entries.filter((entry) => entry.type !== 'unmount' && entry.duration >= threshold),
+        );
+      }
+    } finally {
+      monitor.destroy();
+    }
+  });
+});

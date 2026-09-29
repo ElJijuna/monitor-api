@@ -1,5 +1,5 @@
 import SSignal, { type ComputedSignal, computed } from 'ssignal';
-import { appendHistory, validateMaxHistory } from '../core/retainHistory';
+import { appendHistory, diffHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   EventCollectorConfig,
   EventSnapshot,
@@ -84,6 +84,9 @@ export class EventCollector implements IEventCollector {
   #maxDataDepth: number;
   #maxDataBytes: number;
   #listener: ((e: Event) => void) | null = null;
+  /** Label counts of `#countedEntries`, updated from what each change appended and dropped. */
+  #labelCounts = new Map<string, number>();
+  #countedEntries: MonitorEvent[] = [];
 
   constructor(private readonly config: EventCollectorConfig) {
     validateMaxHistory(config.maxHistory);
@@ -97,7 +100,7 @@ export class EventCollector implements IEventCollector {
       [this.#entries],
       ([entries]): EventSnapshot => ({
         entries,
-        byLabel: this.#computeByLabel(entries),
+        byLabel: this.#deriveByLabel(entries),
       }),
     );
   }
@@ -187,14 +190,33 @@ export class EventCollector implements IEventCollector {
     this.onEvent.value = event;
   }
 
-  #computeByLabel(entries: MonitorEvent[]): Record<string, number> {
-    const byLabel = new Map<string, number>();
+  /** O(changed events + labels) per change instead of O(maxHistory). Runs once per new entries. */
+  #deriveByLabel(entries: MonitorEvent[]): Record<string, number> {
+    const counts = this.#labelCounts;
+    const diff = diffHistory(this.#countedEntries, entries);
 
-    for (const event of entries) {
-      byLabel.set(event.label, (byLabel.get(event.label) ?? 0) + 1);
+    if (!diff) {
+      counts.clear();
     }
 
-    return Object.fromEntries(byLabel);
+    for (const event of diff?.removed ?? []) {
+      // A dropped event was counted when it was added.
+      const count = (counts.get(event.label) as number) - 1;
+
+      if (count === 0) {
+        counts.delete(event.label);
+      } else {
+        counts.set(event.label, count);
+      }
+    }
+
+    for (const event of diff?.added ?? entries) {
+      counts.set(event.label, (counts.get(event.label) ?? 0) + 1);
+    }
+
+    this.#countedEntries = entries;
+
+    return Object.fromEntries(counts);
   }
 }
 

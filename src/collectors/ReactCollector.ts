@@ -1,5 +1,5 @@
 import SSignal, { type ComputedSignal, computed } from 'ssignal';
-import { appendHistory, validateMaxHistory } from '../core/retainHistory';
+import { appendHistory, diffHistory, validateMaxHistory } from '../core/retainHistory';
 import type {
   ComponentStats,
   IReactCollector,
@@ -203,6 +203,26 @@ function normalizeMaxFiberVisits(value: number | undefined): number {
   return Math.max(0, Math.floor(value));
 }
 
+/** Running totals of one component; durations in integer tenths of a millisecond stay exact. */
+interface ComponentTotals {
+  renders: number;
+  tenths: number;
+  lastRender: number;
+  stats: ComponentStats;
+}
+
+function toStats({ renders, tenths, lastRender }: Omit<ComponentTotals, 'stats'>): ComponentStats {
+  return {
+    renders,
+    totalDuration: tenths / 10,
+    avgDuration: Math.round(tenths / renders) / 10,
+    lastRender,
+  };
+}
+
+/** Placeholder until a new component's stats are computed in the same update. */
+const PENDING: ComponentStats = { renders: 0, totalDuration: 0, avgDuration: 0, lastRender: 0 };
+
 interface ReactState {
   entries: RenderEntry[];
   totalCommits: number;
@@ -216,13 +236,17 @@ export class ReactCollector implements IReactCollector {
 
   /** One signal, so each commit recomputes the snapshot once. */
   #state: SSignal<ReactState>;
-  /** Derived from entries; reused while a commit leaves them unchanged. */
+  /**
+   * Derived from entries and updated from what each commit appended and dropped, so a commit costs
+   * O(changed entries + components) instead of O(maxHistory).
+   */
   #derived: {
     entries: RenderEntry[];
     slowThreshold: number;
     byComponent: Record<string, ComponentStats>;
     slowComponents: RenderEntry[];
   } | null = null;
+  #componentTotals = new Map<string, ComponentTotals>();
   #slowThreshold: SSignal<number>;
   #maxFiberVisits: number;
   #commitCounter = 0;
@@ -352,52 +376,136 @@ export class ReactCollector implements IReactCollector {
       return { byComponent: cached.byComponent, slowComponents: cached.slowComponents };
     }
 
-    const derived = {
-      entries,
-      slowThreshold,
-      byComponent:
-        cached?.entries === entries ? cached.byComponent : this.#computeByComponent(entries),
-      slowComponents: entries.filter(
-        (entry) => entry.type !== 'unmount' && entry.duration >= slowThreshold,
-      ),
-    };
+    const diff = cached && cached.entries !== entries ? diffHistory(cached.entries, entries) : null;
+    const isSlow = (entry: RenderEntry) =>
+      entry.type !== 'unmount' && entry.duration >= slowThreshold;
 
-    this.#derived = derived;
+    let byComponent: Record<string, ComponentStats>;
+    let slowComponents: RenderEntry[];
 
-    return { byComponent: derived.byComponent, slowComponents: derived.slowComponents };
+    if (cached?.entries === entries) {
+      ({ byComponent } = cached);
+    } else if (cached && diff) {
+      byComponent = this.#updateByComponent(cached.byComponent, diff.removed, diff.added);
+    } else {
+      byComponent = this.#rebuildByComponent(entries);
+    }
+
+    if (cached && diff && cached.slowThreshold === slowThreshold) {
+      // Retained slow entries keep their order, so dropped ones are at the front of the list.
+      const removed = diff.removed.filter(isSlow).length;
+      const added = diff.added.filter(isSlow);
+
+      slowComponents =
+        removed === 0 && added.length === 0
+          ? cached.slowComponents
+          : [...cached.slowComponents.slice(removed), ...added];
+    } else {
+      slowComponents = entries.filter(isSlow);
+    }
+
+    this.#derived = { entries, slowThreshold, byComponent, slowComponents };
+
+    return { byComponent, slowComponents };
   }
 
-  #computeByComponent(entries: RenderEntry[]): Record<string, ComponentStats> {
-    const byComponent = new Map<string, ComponentStats>();
+  /** Used when the history does not continue the previous one, such as after clearLog. */
+  #rebuildByComponent(entries: readonly RenderEntry[]): Record<string, ComponentStats> {
+    const totals = this.#componentTotals;
+
+    totals.clear();
 
     for (const entry of entries) {
       if (entry.type === 'unmount') {
         continue;
       }
 
-      const existing = byComponent.get(entry.component);
+      const current = totals.get(entry.component);
+      const tenths = Math.round(entry.duration * 10);
 
-      if (existing) {
-        const renders = existing.renders + 1;
-        const totalDuration = existing.totalDuration + entry.duration;
-
-        byComponent.set(entry.component, {
-          renders,
-          totalDuration,
-          avgDuration: Math.round((totalDuration / renders) * 10) / 10,
-          lastRender: entry.timestamp,
-        });
+      if (current) {
+        current.renders += 1;
+        current.tenths += tenths;
+        current.lastRender = entry.timestamp;
       } else {
-        byComponent.set(entry.component, {
+        totals.set(entry.component, {
           renders: 1,
-          totalDuration: entry.duration,
-          avgDuration: entry.duration,
+          tenths,
           lastRender: entry.timestamp,
+          stats: PENDING,
         });
       }
     }
 
+    const byComponent: [string, ComponentStats][] = [];
+
+    for (const [component, current] of totals) {
+      current.stats = toStats(current);
+      byComponent.push([component, current.stats]);
+    }
+
     return Object.fromEntries(byComponent);
+  }
+
+  /** Applies dropped and appended entries; unchanged components keep their stats objects. */
+  #updateByComponent(
+    previous: Record<string, ComponentStats>,
+    removed: readonly RenderEntry[],
+    added: readonly RenderEntry[],
+  ): Record<string, ComponentStats> {
+    const totals = this.#componentTotals;
+    const changed = new Set<string>();
+
+    for (const entry of removed) {
+      const current = entry.type === 'unmount' ? undefined : totals.get(entry.component);
+
+      if (current) {
+        current.renders -= 1;
+        current.tenths -= Math.round(entry.duration * 10);
+        changed.add(entry.component);
+      }
+    }
+
+    for (const entry of added) {
+      if (entry.type === 'unmount') {
+        continue;
+      }
+
+      const current = totals.get(entry.component);
+      const tenths = Math.round(entry.duration * 10);
+
+      if (current) {
+        current.renders += 1;
+        current.tenths += tenths;
+        current.lastRender = entry.timestamp;
+      } else {
+        // Stats are computed below, once per changed component.
+        totals.set(entry.component, {
+          renders: 1,
+          tenths,
+          lastRender: entry.timestamp,
+          stats: PENDING,
+        });
+      }
+
+      changed.add(entry.component);
+    }
+
+    if (changed.size === 0) {
+      return previous;
+    }
+
+    for (const component of changed) {
+      const current = totals.get(component) as ComponentTotals;
+
+      if (current.renders === 0) {
+        totals.delete(component);
+      } else {
+        current.stats = toStats(current);
+      }
+    }
+
+    return Object.fromEntries([...totals].map(([component, { stats }]) => [component, stats]));
   }
 
   #walkFiber(fiber: Fiber | null, entries: RenderEntry[], now: number, commitId: number): boolean {

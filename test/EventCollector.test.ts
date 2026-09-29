@@ -373,3 +373,37 @@ test('EventCollector rejects non-string labels and stays inert after destroy', (
 test('emitMonitorEvent is a no-op outside the browser', () => {
   expect(() => emitMonitorEvent('server-side')).not.toThrow();
 });
+
+test('byLabel matches a full recount after every emit, drop and clear', () => {
+  const monitor = createMonitor({ maxHistory: 5, collectors: { events: true } });
+  const labels = ['open', 'save', 'close', 'constructor', 'toString'];
+
+  let seed = 7;
+
+  const random = () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+
+    return seed / 2_147_483_648;
+  };
+
+  try {
+    for (let step = 0; step < 300; step += 1) {
+      if (random() < 0.03) {
+        monitor.events.clearLog();
+      } else {
+        monitor.events.emit(labels[Math.floor(random() * labels.length)] as string);
+      }
+
+      const { entries, byLabel } = monitor.events.snapshot.value;
+      const expected = new Map<string, number>();
+
+      for (const event of entries) {
+        expected.set(event.label, (expected.get(event.label) ?? 0) + 1);
+      }
+
+      expect(byLabel).toEqual(Object.fromEntries(expected));
+    }
+  } finally {
+    monitor.destroy();
+  }
+});

@@ -29,17 +29,17 @@ Median of three runs.
 | Benchmark | Throughput | Average time | Spread |
 | --- | ---: | ---: | ---: |
 | `createMonitor + destroy` | 40,384 ops/s | 24.76 us | ±31% |
-| `emitMonitorEvent` | 205,182 ops/s | 4.87 us | ±1–28% |
+| `emitMonitorEvent` | 652,404 ops/s | 1.53 us | ±1–31% |
 | `Web Vitals subscribe + destroy` | 123,522 ops/s | 8.10 us | ±14–21% |
 | `fetch baseline (unpatched)` | 38,227,735 ops/s | 26.16 ns | ±6% |
 | `fetch through the network collector` | 1,166,950 ops/s | 857 ns | ±1–4% |
 | `errors.capture` | 1,972,534 ops/s | 507 ns | ±1–21% |
 | `reporter flush (default payload)` | 805,604 ops/s | 1.24 us | ±0.4% |
 | `reporter flush (32 KB transform)` | 24,393 ops/s | 41.00 us | ±0.3–4.5% |
-| `React commit with 50 fibers` | 89,119 ops/s | 11.22 us | ±4–7% |
-| `React commit with 1,000 deep fibers` | 13,309 ops/s | 75.14 us | ±2–3% |
-| `React commit with 1,000 wide fibers` | 13,095 ops/s | 76.36 us | ±1–8% |
-| `React commit with 50 fibers, 5,000 history` | 12,200 ops/s | 81.97 us | ±12% |
+| `React commit with 50 fibers` | 138,638 ops/s | 7.21 us | ±2–4% |
+| `React commit with 1,000 deep fibers` | 11,161 ops/s | 89.60 us | ±1–2% |
+| `React commit with 1,000 wide fibers` | 10,946 ops/s | 91.36 us | ±1–5% |
+| `React commit with 50 fibers, 5,000 history` | 81,192 ops/s | 12.32 us | ±2–7% |
 
 ## Interpretation
 
@@ -88,20 +88,32 @@ time.
 The React cases cover a normal 50-fiber commit plus deep and wide 1,000-fiber
 trees. The collector walks each tree, creates render entries, trims retained
 history, and derives per-component statistics. Commit counters and entries live
-in one signal, so each commit recomputes the snapshot once, and the derived
-statistics are reused when a commit adds no render entries. The 5,000-history
-case runs the same 50-fiber commit with `maxHistory: 5000`. It is about 7 times
-slower, because each commit copies the retained entries and rebuilds
-`byComponent` from all of them.
+in one signal, so each commit recomputes the snapshot once.
+
+`byComponent`, `slowComponents` and the events collector's `byLabel` are updated
+from what each change appended to and dropped from the retained history, instead
+of being recomputed from all of it. A commit therefore costs time proportional
+to its own entries and the number of components, not to `maxHistory`: the
+5,000-history case now runs within a factor of two of the 500-history one, where
+it used to be seven times slower. Components a commit does not touch keep the
+same stats object, so selectors on them stay stable. Durations are summed in
+integer tenths of a millisecond, which also removes floating-point noise such as
+`10.100000000000001` from `totalDuration`.
+
+The 1,000-fiber cases are the exception. Each commit adds more entries than
+`maxHistory: 500` retains, so the history is replaced entirely and the
+statistics are rebuilt from scratch. That rebuild keeps the running totals the
+incremental path needs, which made these two cases about 15% slower than the
+previous full recomputation. Commits larger than the whole retained history are
+rare in practice, and every other case got faster: `emitMonitorEvent` about 3
+times, the 50-fiber commit about 1.5 times, and the 5,000-history commit about
+6.7 times.
 
 ## Potential Improvements
 
-**Incremental React statistics.** `ReactCollector.byComponent` and
-`EventCollector.byLabel` are derived from retained entries to keep runtime
-memory bounded. That is the right default for correctness and safety, but the
-5,000-history case shows the cost grows with `maxHistory`. The collectors could
-maintain aggregate maps incrementally, subtracting entries that fall out of
-`maxHistory`.
+**History copies.** Each change still copies the retained history array, so
+that React sees a new reference. A ring buffer that shares storage between
+snapshots could avoid the copy, but it must keep exposing new, immutable arrays.
 
 **Report size check.** Bodies in the ambiguous length range are still encoded
 in full only to read their byte length. `TextEncoder.encodeInto` with a reused
