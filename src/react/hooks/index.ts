@@ -4,5 +4,6 @@ export { useMonitor } from './useMonitor';
 export { useNetwork } from './useNetwork';
 export { usePerformance } from './usePerformance';
 export { useReact } from './useReact';
+export { useResources } from './useResources';
 export { useSignal } from './useSignal';
 export { useWebVitals } from './useWebVitals';

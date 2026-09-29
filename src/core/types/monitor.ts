@@ -8,6 +8,7 @@ import type {
   PerformanceSnapshot,
 } from './performance';
 import type { IReactCollector, ReactCollectorConfig, ReactSnapshot } from './react';
+import type { IResourceCollector, ResourceCollectorConfig, ResourceSnapshot } from './resources';
 import type { IWebVitalsCollector, WebVitalsCollectorConfig, WebVitalsSnapshot } from './webVitals';
 
 /** Complete point-in-time state collected by a monitor instance. */
@@ -24,6 +25,8 @@ export interface MonitorSnapshot {
   events: EventSnapshot;
   /** Optional captured JavaScript errors. Disabled by default. */
   errors: ErrorSnapshot;
+  /** Optional asset timings from the Resource Timing API. Disabled by default. */
+  resources: ResourceSnapshot;
   /** Standard Web Vitals metrics collected from the browser. */
   webVitals: WebVitalsSnapshot;
 }
@@ -123,7 +126,14 @@ export interface IReporter {
 }
 
 /** Built-in collector names accepted by {@link MonitorConfig.collectors}. */
-export type CollectorName = 'performance' | 'network' | 'react' | 'events' | 'webVitals' | 'errors';
+export type CollectorName =
+  | 'performance'
+  | 'network'
+  | 'react'
+  | 'events'
+  | 'webVitals'
+  | 'errors'
+  | 'resources';
 
 /** Options used when creating a monitor instance. */
 export interface MonitorConfig {
@@ -141,6 +151,7 @@ export interface MonitorConfig {
         react?: boolean | Partial<ReactCollectorConfig>;
         events?: boolean | Partial<EventCollectorConfig>;
         errors?: boolean | Partial<ErrorCollectorConfig>;
+        resources?: boolean | Partial<ResourceCollectorConfig>;
         webVitals?: boolean | Partial<WebVitalsCollectorConfig>;
       };
   /** Per-monitor sampling probability from 0 to 1. Defaults to 1. */
@@ -169,6 +180,8 @@ export interface Monitor {
   events: IEventCollector;
   /** Optional error collector API. */
   errors: IErrorCollector;
+  /** Optional Resource Timing collector API. */
+  resources: IResourceCollector;
   /** Web Vitals collector API. */
   webVitals: IWebVitalsCollector;
   /** Reactive signal containing the combined monitor snapshot. */

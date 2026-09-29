@@ -14,6 +14,7 @@ third-party analytics endpoint.
 | React | Component names, render durations, commits, and derived counts | Commit, truncation, and slow-render counts only |
 | Events | Application labels and serializable custom payloads | Retained event count only |
 | Errors | Message, stack, source location, type, and occurrence count | Error counters only |
+| Resources (opt-in) | Asset URLs, types, durations, sizes, cache state, status, and origin | Totals and per-type aggregates only |
 | Web Vitals | Values, deltas, ratings, IDs, navigation types, and timestamps; with `attribution`, also CSS selectors of the LCP, INP, and CLS elements, the LCP resource URL, the longest script's URL and invoker, and phase timings | Values, deltas, and ratings; with `attribution`, phase timings, interaction type, load state, and script invoker type, but no selectors, URLs, or invokers |
 
 All histories are held in JavaScript memory and bounded by `maxHistory`. Calling
@@ -25,7 +26,7 @@ across page loads.
 
 Reporting runs only when `env: 'production'` and `report.endpoint` or a custom
 transport is provided. The built-in payload is an allowlist. It excludes request
-URLs, headers and bodies; event labels and payloads; component names; error
+URLs, headers and bodies; resource URLs; event labels and payloads; component names; error
 messages and stacks; Web Vital IDs and navigation types; Web Vitals attribution
 selectors, URLs, and script invokers; and all retained histories. The report endpoint is excluded from network instrumentation.
 

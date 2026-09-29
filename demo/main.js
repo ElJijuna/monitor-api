@@ -29,6 +29,7 @@ const monitor = createMonitor({
     network: true,
     events: true,
     errors: true,
+    resources: true,
     webVitals: { attribution: true },
   },
   env: 'production',

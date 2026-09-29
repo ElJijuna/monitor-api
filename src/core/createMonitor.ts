@@ -4,6 +4,7 @@ import { EventCollector } from '../collectors/EventCollector';
 import { NetworkCollector } from '../collectors/NetworkCollector';
 import { PerformanceCollector } from '../collectors/PerformanceCollector';
 import { ReactCollector } from '../collectors/ReactCollector';
+import { ResourceCollector } from '../collectors/ResourceCollector';
 import { WebVitalsCollector } from '../collectors/WebVitalsCollector';
 import {
   createDisabledErrorCollector,
@@ -11,6 +12,7 @@ import {
   createDisabledNetworkCollector,
   createDisabledPerformanceCollector,
   createDisabledReactCollector,
+  createDisabledResourceCollector,
   createDisabledWebVitalsCollector,
 } from './createDisabledCollectors';
 import { createReporter, validateReportConfig } from './createReporter';
@@ -25,6 +27,7 @@ import type {
   NetworkCollectorConfig,
   PerformanceCollectorConfig,
   ReactCollectorConfig,
+  ResourceCollectorConfig,
   WebVitalAttributionMap,
   WebVitalMetric,
   WebVitalName,
@@ -47,7 +50,20 @@ function summarizeWebVital<N extends WebVitalName>(
   };
 }
 
-function createDefaultReportPayload(snap: MonitorSnapshot) {
+/** Resource Timing reports absolute URLs, while the endpoint may be relative. */
+function isReportEndpoint(url: string, endpoint: string | undefined): boolean {
+  if (endpoint === undefined) {
+    return false;
+  }
+
+  try {
+    return url === new URL(endpoint, location.href).href;
+  } catch {
+    return url === endpoint;
+  }
+}
+
+function createDefaultReportPayload(snap: MonitorSnapshot, includeResources: boolean) {
   return {
     timestamp: snap.timestamp,
     performance: {
@@ -72,6 +88,10 @@ function createDefaultReportPayload(snap: MonitorSnapshot) {
       droppedErrors: snap.errors.droppedErrors,
       retainedErrors: snap.errors.entries.length,
     },
+    // Aggregates only: resource URLs stay local. Omitted unless the collector is enabled.
+    ...(includeResources
+      ? { resources: { totals: snap.resources.totals, byType: snap.resources.byType } }
+      : {}),
     // Attribution keeps timings and categories only: selectors, URLs, and invokers stay local.
     webVitals: {
       cls: summarizeWebVital(snap.webVitals.cls, (a) => ({
@@ -200,6 +220,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const reactConfig: ReactCollectorConfig = { maxHistory, slowThreshold: 16 };
   const eventsConfig: EventCollectorConfig = { maxHistory };
   const errorsConfig: ErrorCollectorConfig = { maxHistory };
+  const resourcesConfig: ResourceCollectorConfig = { maxHistory };
   const webVitalsConfig: WebVitalsCollectorConfig = { maxHistory, reportAllChanges: true };
   const perfCfg = resolveCollector('performance', config, perfConfig);
   const netCfg = resolveCollector('network', config, netConfig);
@@ -207,6 +228,9 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
   const reactCfg = resolveCollector('react', config, reactConfig);
   const eventsCfg = resolveCollector('events', config, eventsConfig);
   const errorsCfg = config.collectors ? resolveCollector('errors', config, errorsConfig) : false;
+  const resourcesCfg = config.collectors
+    ? resolveCollector('resources', config, resourcesConfig)
+    : false;
   const webVitalsCfg = resolveCollector('webVitals', config, webVitalsConfig);
   const active = {
     performance: sampledIn && perfCfg !== false,
@@ -214,6 +238,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     react: sampledIn && reactCfg !== false,
     events: sampledIn && eventsCfg !== false,
     errors: sampledIn && errorsCfg !== false,
+    resources: sampledIn && resourcesCfg !== false,
     webVitals: sampledIn && webVitalsCfg !== false,
   };
   const performance =
@@ -230,6 +255,10 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     active.events && eventsCfg ? new EventCollector(eventsCfg) : createDisabledEventCollector();
   const errors =
     active.errors && errorsCfg ? new ErrorCollector(errorsCfg) : createDisabledErrorCollector();
+  const resources =
+    active.resources && resourcesCfg
+      ? new ResourceCollector(resourcesCfg, (url) => isReportEndpoint(url, reportEndpoint))
+      : createDisabledResourceCollector();
   const webVitals =
     active.webVitals && webVitalsCfg
       ? new WebVitalsCollector(webVitalsCfg)
@@ -240,6 +269,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     ...(active.react ? [react.snapshot] : []),
     ...(active.events ? [events.snapshot] : []),
     ...(active.errors ? [errors.snapshot] : []),
+    ...(active.resources ? [resources.snapshot] : []),
     ...(active.webVitals ? [webVitals.snapshot] : []),
   ];
   const signal = computed(
@@ -251,6 +281,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       react: react.snapshot.value,
       events: events.snapshot.value,
       errors: errors.snapshot.value,
+      resources: resources.snapshot.value,
       webVitals: webVitals.snapshot.value,
     }),
   );
@@ -262,7 +293,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
 
     return config.report?.transform
       ? config.report.transform(snap)
-      : createDefaultReportPayload(snap);
+      : createDefaultReportPayload(snap, active.resources);
   });
 
   function startAll() {
@@ -290,6 +321,10 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
       errors.start();
     }
 
+    if (active.resources) {
+      resources.start();
+    }
+
     if (active.webVitals) {
       webVitals.start();
     }
@@ -303,6 +338,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     react.stop();
     events.stop();
     errors.stop();
+    resources.stop();
     webVitals.stop();
     reporter.stop();
   }
@@ -319,6 +355,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     react.destroy();
     events.destroy();
     errors.destroy();
+    resources.destroy();
     webVitals.destroy();
     signal.dispose();
   }
@@ -330,6 +367,7 @@ export function createMonitor(config: MonitorConfig = {}): Monitor {
     react,
     events,
     errors,
+    resources,
     webVitals,
     signal,
     getSnapshot: () => signal.value,

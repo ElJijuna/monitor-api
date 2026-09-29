@@ -9,14 +9,14 @@
 [![GitHub stars](https://img.shields.io/github/stars/ElJijuna/monitor-api)](https://github.com/ElJijuna/monitor-api/stargazers)
 
 Lightweight, **signal-based** web app monitoring library.  
-Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, custom events, and optional errors — all reactive via [ssignal](https://github.com/ElJijuna/ssignal).
+Captures FPS, JS heap, long tasks, Web Vitals, network requests, React renders, custom events, and optional errors and asset timings — all reactive via [ssignal](https://github.com/ElJijuna/ssignal).
 
 ## Features
 
 - **Signal-based** — subscribe to exactly what you need, no polling
-- **6 collectors** — Performance, Network, React, Events, optional Errors, Web Vitals
+- **7 collectors** — Performance, Network, React, Events, Web Vitals, optional Errors and Resources
 - **Web Vitals** — CLS, FCP, INP, LCP, and TTFB via `web-vitals`
-- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useWebVitals`
+- **React integration** — `useSignal`, `usePerformance`, `useNetwork`, `useReact`, `useEvents`, `useErrors`, `useResources`, `useWebVitals`
 - **Zero config** — works out of the box, tree-shakeable
 - **SSR safe** — browser collectors no-op outside the browser
 - **Production-ready lifecycle** — `start()` is idempotent and `stop()` restores runtime patches
@@ -506,6 +506,61 @@ lifetime counters.
 
 ---
 
+### ResourceCollector
+
+Records how the page's own assets load — scripts, stylesheets, images, fonts,
+media, and iframes — from the browser's Resource Timing API. `fetch` and
+`XMLHttpRequest` calls are left to the NetworkCollector, and beacons are
+ignored, so nothing is counted twice. Like errors, it is disabled by default:
+add `resources` to `collectors` to enable it.
+
+```ts
+const monitor = createMonitor({
+  collectors: ['performance', 'network', 'webVitals', 'resources'],
+})
+
+monitor.start() // also records the assets loaded before start()
+
+monitor.resources.snapshot.subscribe(({ totals, byType, slowest }) => {
+  console.log('Assets:', totals.count, 'bytes:', totals.transferSize)
+  console.log('Cache hits:', totals.cacheHits, 'render-blocking:', totals.renderBlockingCount)
+  console.log('Scripts:', byType.script.count, 'third-party:', totals.thirdPartyCount)
+  console.log('Slowest:', slowest.map((r) => `${r.url} ${r.duration}ms`))
+})
+```
+
+**Entry shape:**
+
+```ts
+interface ResourceEntry {
+  url: string                 // capped at 2,048 characters
+  type: 'script' | 'stylesheet' | 'image' | 'font' | 'media' | 'iframe' | 'other'
+  initiatorType: string       // raw browser value: 'link', 'img', 'css', ...
+  duration: number            // ms from fetch start to last byte
+  transferSize: number        // bytes over the network, 0 when cached
+  encodedBodySize: number
+  decodedBodySize: number
+  cache: 'hit' | 'miss' | 'unknown'
+  renderBlocking: boolean | null
+  status: number | null
+  thirdParty: boolean
+  timestamp: number           // when the resource finished loading
+}
+```
+
+`totals` and `byType` are cumulative for the monitor's lifetime and do not
+depend on `maxHistory`; `clearLog()` resets them. `slowest` keeps the
+`slowestCount` (default 5) longest loads.
+
+Cross-origin servers that do not send `Timing-Allow-Origin` hide sizes and
+status, so those entries report `cache: 'unknown'`, zero sizes, and a `null`
+status; their duration is still accurate. `renderBlocking` and `status` depend
+on browser support and are `null` elsewhere. The first `start()` includes the
+assets the browser buffered before it (the default buffer holds 250 entries);
+after `stop()`, a new `start()` records only resources that finish after it.
+
+---
+
 ## Unified snapshot
 
 Subscribe to all collectors at once:
@@ -519,6 +574,7 @@ monitor.subscribe((snap) => {
   console.log('  React commits:', snap.react.totalCommits)
   console.log('  Custom events:', snap.events.entries.length)
   console.log('  Errors:', snap.errors.totalErrors)
+  console.log('  Assets:', snap.resources.totals.count)
 })
 
 // Or read synchronously
@@ -531,7 +587,7 @@ const snap = monitor.getSnapshot()
 
 ```tsx
 import { createMonitor } from 'monitor-api'
-import { useSignal, usePerformance, useNetwork, useReact, useEvents, useErrors, useWebVitals } from 'monitor-api/react'
+import { useSignal, usePerformance, useNetwork, useReact, useEvents, useErrors, useResources, useWebVitals } from 'monitor-api/react'
 
 const monitor = createMonitor()
 monitor.start()
@@ -717,6 +773,10 @@ createMonitor({
     errors: {
       dedupWindow: 1000,            // default 1000ms
       sanitize: (details) => details,
+    },
+    resources: {
+      filter: (url) => !url.includes('/analytics'),
+      slowestCount: 5,             // default 5
     },
     webVitals: {
       reportAllChanges: true,  // default true

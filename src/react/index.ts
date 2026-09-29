@@ -5,6 +5,7 @@ export {
   useNetwork,
   usePerformance,
   useReact,
+  useResources,
   useSignal,
   useWebVitals,
 } from './hooks/index';

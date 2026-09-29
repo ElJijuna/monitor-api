@@ -1,10 +1,12 @@
 import SSignal from 'ssignal';
+import { emptyResourceSnapshot } from '../collectors/ResourceCollector';
 import type {
   IErrorCollector,
   IEventCollector,
   INetworkCollector,
   IPerformanceCollector,
   IReactCollector,
+  IResourceCollector,
   IWebVitalsCollector,
   LongTaskInfo,
   MemoryInfo,
@@ -14,6 +16,7 @@ import type {
   PerformanceSnapshot,
   ReactSnapshot,
   RenderEntry,
+  ResourceEntry,
   WebVitalMetric,
   WebVitalsSnapshot,
 } from './types';
@@ -103,6 +106,17 @@ export function createDisabledErrorCollector(): IErrorCollector {
     snapshot: new SSignal({ entries: [], totalErrors: 0, droppedErrors: 0 }),
     onError: new SSignal<MonitorError | null>(null),
     capture: noop,
+    clearLog: noop,
+    start: noop,
+    stop: noop,
+    destroy: noop,
+  };
+}
+
+export function createDisabledResourceCollector(): IResourceCollector {
+  return {
+    snapshot: new SSignal(emptyResourceSnapshot()),
+    onResource: new SSignal<ResourceEntry | null>(null),
     clearLog: noop,
     start: noop,
     stop: noop,

@@ -44,10 +44,12 @@ test('demo captures browser activity through the built package', async ({ page }
 
   const storedReports = await page.request.get('/api/reports').then((response) => response.json());
 
-  expect(storedReports.reports.length).toBeGreaterThanOrEqual(1);
-  expect(storedReports.reports.at(-1)).toMatchObject({
-    errors: { totalErrors: 1 },
-    events: { count: 1 },
-    network: { window5s: expect.any(Object) },
-  });
+  // The server keeps reports from every page, and parallel tests post theirs too.
+  expect(storedReports.reports).toContainEqual(
+    expect.objectContaining({
+      errors: expect.objectContaining({ totalErrors: 1 }),
+      events: expect.objectContaining({ count: 1 }),
+      network: expect.objectContaining({ window5s: expect.any(Object) }),
+    }),
+  );
 });
