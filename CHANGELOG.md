@@ -1,3 +1,24 @@
+# [1.5.0](https://github.com/ElJijuna/monitor-api/compare/v1.4.0...v1.5.0) (2026-09-29)
+
+
+### Bug Fixes
+
+* count only real renders and report self durations ([4c936da](https://github.com/ElJijuna/monitor-api/commit/4c936da7c1e9a43b3fdf3c40dbc24875f0c56e07))
+* enhance timeout handling in ProductionReportConfig and add related tests ([b9691f8](https://github.com/ElJijuna/monitor-api/commit/b9691f8ba6409660062ebb5850aa43130c42a7e7))
+* update esbuild override to use variable reference ([a8a60fe](https://github.com/ElJijuna/monitor-api/commit/a8a60fe7845150b2fca75743dc04f3aa6f78d37b))
+
+
+### Features
+
+* add exclusion for reporter endpoint in NetworkCollector and update tests ([8e2df7d](https://github.com/ElJijuna/monitor-api/commit/8e2df7d68e54a82e99e5d52ff74025f4cfaefa27))
+* add Resource Timing collector for monitoring page assets ([1b079ca](https://github.com/ElJijuna/monitor-api/commit/1b079ca1ba17add5d69ba969fe8fdecd8aae62c3))
+* add Web Vitals attribution for enhanced diagnostics and reporting ([15b7ae0](https://github.com/ElJijuna/monitor-api/commit/15b7ae0635e7d00084c5d47364b8abbd52629c20))
+* enhance ReactCollector and createMonitor with resource management and performance optimizations ([f285cbc](https://github.com/ElJijuna/monitor-api/commit/f285cbc9d98103f1eefd893f228fc08f063f4738))
+* implement keepalive reporting for hidden/unloaded pages and add related tests ([5d224d3](https://github.com/ElJijuna/monitor-api/commit/5d224d3492977f17d3d10edb489c5210565841ae))
+* implement selector-based reactivity in hooks for optimized rendering ([1e24b24](https://github.com/ElJijuna/monitor-api/commit/1e24b2461e4bb7b156c01d8977ec3a11894f4847))
+* optimize error deduplication logic in ErrorCollector and add corresponding test ([a964a24](https://github.com/ElJijuna/monitor-api/commit/a964a24d08387ba34c8f63886e921ac5aec30fa8))
+* update build process and add package verification tests ([62249ae](https://github.com/ElJijuna/monitor-api/commit/62249aed04f7f4270da4ec1aa670811e1e927934))
+
 # [1.4.0](https://github.com/ElJijuna/monitor-api/compare/v1.3.0...v1.4.0) (2026-09-07)
 
 
