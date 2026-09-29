@@ -31,6 +31,7 @@ export type {
   LongAnimationFrameInfo,
   LongAnimationFrameScript,
   LongTaskInfo,
+  MemoryContext,
   MemoryInfo,
   MemoryMeasurement,
   // Core

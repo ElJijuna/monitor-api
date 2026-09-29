@@ -23,8 +23,35 @@ export interface MemoryMeasurement {
    * `Other`.
    */
   byType: Record<string, number>;
+  /**
+   * The frames and workers holding the most memory, largest first, capped at 20. Memory shared
+   * between several contexts or not attributed to any is left out, so the list can sum to less
+   * than `total`.
+   */
+  byContext: MemoryContext[];
   /** Unix timestamp in milliseconds when the measurement resolved. */
   timestamp: number;
+}
+
+/** Memory held by one frame or worker in a {@link MemoryMeasurement}. */
+export interface MemoryContext {
+  /** Megabytes attributed to this context. */
+  total: number;
+  /**
+   * URL of the frame or worker, capped at 500 characters. Null for cross-origin frames, whose
+   * URL the browser does not expose.
+   */
+  url: string | null;
+  /**
+   * Kind of global scope, such as `Window`, `DedicatedWorkerGlobalScope`,
+   * `SharedWorkerGlobalScope`, `ServiceWorkerGlobalScope`, or `cross-origin-aggregated`.
+   */
+  scope: string | null;
+  /**
+   * The `id` and `src` attributes (capped at 500 characters) of the iframe element that holds the
+   * context, or null for the top-level page and workers created by it.
+   */
+  container: { id: string | null; src: string | null } | null;
 }
 
 /** Aggregate information about observed long tasks. */

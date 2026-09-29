@@ -147,7 +147,8 @@ In cross-origin isolated pages (served with `Cross-Origin-Opener-Policy: same-or
 `Cross-Origin-Embedder-Policy: require-corp` or `credentialless`), Chromium also exposes
 [`performance.measureUserAgentSpecificMemory()`](https://developer.mozilla.org/docs/Web/API/Performance/measureUserAgentSpecificMemory).
 It counts all the memory the page uses, including the DOM, same-origin iframes, and workers, not only
-the JavaScript heap. `memoryMeasurement` reports the total and a per-type breakdown in megabytes. The
+the JavaScript heap. `memoryMeasurement` reports the total in megabytes, broken down by memory type
+and by the frames and workers that hold it (the 20 largest, with URLs capped at 500 characters). The
 first measurement runs on `start()`, and later ones follow at randomized delays averaging
 `memoryMeasurementInterval` (five minutes by default; `false` disables it) while the page is visible.
 The browser answers at its next garbage collection, so each result can take tens of seconds. See
@@ -174,6 +175,10 @@ monitor.performance.memory.subscribe((mem) => {
 monitor.performance.memoryMeasurement.subscribe((measurement) => {
   if (measurement) {
     console.log(`Page memory: ${measurement.total}MB`, measurement.byType) // { JavaScript: 38.2, DOM: 6.1, ... }
+
+    for (const { total, scope, url } of measurement.byContext) {
+      console.log(`  ${total}MB in ${scope}: ${url ?? 'cross-origin frame'}`)
+    }
   }
 })
 
@@ -206,7 +211,12 @@ monitor.performance.snapshot.subscribe((snap) => {
     fpsHistory: [60, 59, 58],
     memory: { used: 45.2, total: 2048, percent: 2.2 },
     memoryHistory: [2.1, 2.2, 2.2],
-    memoryMeasurement: { total: 52.4, byType: { JavaScript: 44.3, DOM: 8.1 }, timestamp: 1767225600000 },
+    memoryMeasurement: {
+      total: 52.4,
+      byType: { JavaScript: 44.3, DOM: 8.1 },
+      byContext: [{ total: 41.2, url: 'https://app.example/', scope: 'Window', container: null }, ...],
+      timestamp: 1767225600000
+    },
     longTasks: { count: 3, lastDuration: 82.5 },
     longAnimationFrames: { count: 2, totalBlockingDuration: 140, maxBlockingDuration: 90, entries: [...] },
     cls: 0.0023
@@ -226,7 +236,17 @@ interface PerformanceSnapshot {
   fpsHistory: number[]
   memory: { used: number; total: number; percent: number } | null
   memoryHistory: number[]
-  memoryMeasurement: { total: number; byType: Record<string, number>; timestamp: number } | null
+  memoryMeasurement: {
+    total: number
+    byType: Record<string, number>
+    byContext: {
+      total: number
+      url: string | null   // null for cross-origin frames
+      scope: string | null // 'Window', 'DedicatedWorkerGlobalScope', 'cross-origin-aggregated', …
+      container: { id: string | null; src: string | null } | null // the iframe element, if any
+    }[] // the 20 largest, largest first; shared or unattributed memory is left out
+    timestamp: number
+  } | null
   longTasks: { count: number; lastDuration: number | null }
   longAnimationFrames: {
     count: number

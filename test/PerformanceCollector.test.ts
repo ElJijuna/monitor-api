@@ -963,6 +963,7 @@ describe('memory measurement', () => {
       expect(monitor.getSnapshot().performance.memoryMeasurement).toEqual({
         total: 16,
         byType: { JavaScript: 10, DOM: 4, Other: 2 },
+        byContext: [],
         timestamp: expect.any(Number),
       });
 
@@ -970,6 +971,78 @@ describe('memory measurement', () => {
       expect(measure).toHaveBeenCalledTimes(1);
       await jest.advanceTimersByTimeAsync(100);
       expect(measure).toHaveBeenCalledTimes(2);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('attributes memory to frames and workers, largest first', async () => {
+    const browser = installPerformanceBrowser();
+    const page = { url: 'https://app.test/', scope: 'Window' };
+    const worker = { url: 'https://app.test/worker.js', scope: 'DedicatedWorkerGlobalScope' };
+    const embed = {
+      url: 'cross-origin-url',
+      scope: 'cross-origin-aggregated',
+      container: { id: 'map', src: `https://maps.test/${'x'.repeat(600)}` },
+    };
+    const contexts = Array.from({ length: 25 }, (_, i) => ({
+      url: `https://app.test/frame-${i}.html`,
+      scope: 'Window',
+      container: { id: '', src: `/frame-${i}.html` },
+    }));
+
+    installMeasure(async () => ({
+      bytes: 100 * MB,
+      breakdown: [
+        { bytes: 30 * MB, types: ['JavaScript'], attribution: [page] },
+        { bytes: 10 * MB, types: ['DOM'], attribution: [page] },
+        { bytes: 20 * MB, types: ['JavaScript'], attribution: [worker] },
+        { bytes: 5 * MB, types: ['JavaScript'], attribution: [embed] },
+        // Shared between two contexts, or attributed to none: left out of byContext.
+        { bytes: 15 * MB, types: ['Shared'], attribution: [page, worker] },
+        { bytes: 5 * MB, types: [], attribution: [] },
+        ...contexts.map((context, i) => ({
+          bytes: (i + 1) * 0.01 * MB,
+          types: ['DOM'],
+          attribution: [context],
+        })),
+      ],
+    }));
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      const byContext = monitor.performance.memoryMeasurement.value?.byContext ?? [];
+
+      expect(byContext).toHaveLength(20);
+      expect(byContext.slice(0, 4)).toEqual([
+        { total: 40, url: 'https://app.test/', scope: 'Window', container: null },
+        {
+          total: 20,
+          url: 'https://app.test/worker.js',
+          scope: 'DedicatedWorkerGlobalScope',
+          container: null,
+        },
+        {
+          total: 5,
+          url: null,
+          scope: 'cross-origin-aggregated',
+          container: { id: 'map', src: `https://maps.test/${'x'.repeat(482)}` },
+        },
+        {
+          total: 0.3,
+          url: 'https://app.test/frame-24.html',
+          scope: 'Window',
+          container: { id: null, src: '/frame-24.html' },
+        },
+      ]);
+      // The five smallest frames are dropped.
+      expect(byContext[byContext.length - 1]?.url).toBe('https://app.test/frame-8.html');
 
       monitor.destroy();
     } finally {

@@ -15,9 +15,9 @@ Items are grouped by area and ordered by priority within each group.
   separate field rather than a fallback for `memory`, because it has no heap limit
   to compute `percent` from. The default reporter sends the total as
   `measuredMemory`.
-- [ ] **Per-frame and per-worker memory**: the measurement's `attribution` (which
-  frame or worker holds the memory) is dropped because it contains URLs. Expose it
-  locally with URL limits, as long animation frame scripts do.
+- [x] **Per-frame and per-worker memory**: `memoryMeasurement.byContext` lists the
+  20 frames and workers holding the most memory, with URLs capped at 500
+  characters. It stays local; the default reporter sends only the total.
 - [ ] **`navigator.deviceMemory`**: approximate device RAM in GB (0.25–8). Chromium
   only. Useful for segmenting metrics by device class.
 - [ ] **`navigator.storage.estimate()`**: storage `usage` and `quota` (IndexedDB,
@@ -86,7 +86,7 @@ those metrics do not expose.
    `storage.estimate()`. These APIs are cheap and add context to every other
    metric.
 2. `navigation` timing and the Reporting API.
-3. Compute Pressure, Battery, per-frame memory, and the remaining performance
+3. Compute Pressure, Battery, and the remaining performance
    entry types.
 
 Update [COMPATIBILITY.md](COMPATIBILITY.md) as each item ships.

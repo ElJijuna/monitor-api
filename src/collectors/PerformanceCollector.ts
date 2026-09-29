@@ -6,6 +6,7 @@ import type {
   LongAnimationFrameInfo,
   LongAnimationFrameScript,
   LongTaskInfo,
+  MemoryContext,
   MemoryInfo,
   MemoryMeasurement,
   PerformanceCollectorConfig,
@@ -15,6 +16,9 @@ import type {
 const MAX_LOAF_SCRIPTS = 5;
 const MAX_LOAF_STRING = 500;
 const DEFAULT_MEMORY_MEASUREMENT_INTERVAL_MS = 300_000;
+const MAX_MEMORY_CONTEXTS = 20;
+/** What the browser reports as the URL of a cross-origin frame. */
+const CROSS_ORIGIN_URL = 'cross-origin-url';
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /** The fields read from a `PerformanceScriptTiming`, which TypeScript's DOM lib does not declare. */
@@ -80,8 +84,25 @@ function toMegabytes(bytes: number): number {
   return Math.round((bytes / 1_048_576) * 10) / 10;
 }
 
+function summarizeContext(attribution: MemoryAttribution): Omit<MemoryContext, 'total'> {
+  const container =
+    typeof attribution.container === 'object' && attribution.container !== null
+      ? {
+          id: boundedString(attribution.container.id),
+          src: boundedString(attribution.container.src),
+        }
+      : null;
+
+  return {
+    url: attribution.url === CROSS_ORIGIN_URL ? null : boundedString(attribution.url),
+    scope: boundedString(attribution.scope),
+    container,
+  };
+}
+
 function summarizeMeasurement(result: UserAgentSpecificMemory): MemoryMeasurement {
   const bytesByType = new Map<string, number>();
+  const contexts = new Map<string, { context: Omit<MemoryContext, 'total'>; bytes: number }>();
 
   for (const entry of Array.isArray(result.breakdown) ? result.breakdown : []) {
     if (!(entry.bytes > 0)) {
@@ -94,6 +115,19 @@ function summarizeMeasurement(result: UserAgentSpecificMemory): MemoryMeasuremen
     const key = types.length > 0 ? types.join('+') : 'Other';
 
     bytesByType.set(key, (bytesByType.get(key) ?? 0) + entry.bytes);
+
+    // Memory attributed to several contexts is shared and cannot be split between them.
+    if (Array.isArray(entry.attribution) && entry.attribution.length === 1) {
+      const context = summarizeContext(entry.attribution[0] as MemoryAttribution);
+      const contextKey = JSON.stringify(context);
+      const existing = contexts.get(contextKey);
+
+      if (existing) {
+        existing.bytes += entry.bytes;
+      } else {
+        contexts.set(contextKey, { context, bytes: entry.bytes });
+      }
+    }
   }
 
   const byType: Record<string, number> = {};
@@ -102,7 +136,17 @@ function summarizeMeasurement(result: UserAgentSpecificMemory): MemoryMeasuremen
     byType[type] = toMegabytes(bytes);
   }
 
-  return { total: toMegabytes(finiteOrZero(result.bytes)), byType, timestamp: Date.now() };
+  const byContext = [...contexts.values()]
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, MAX_MEMORY_CONTEXTS)
+    .map(({ context, bytes }) => ({ total: toMegabytes(bytes), ...context }));
+
+  return {
+    total: toMegabytes(finiteOrZero(result.bytes)),
+    byType,
+    byContext,
+    timestamp: Date.now(),
+  };
 }
 
 function boundedString(value: unknown): string | null {
@@ -140,9 +184,15 @@ function summarizeFrame(frame: AnimationFrameTiming): LongAnimationFrameEntry {
   };
 }
 
+interface MemoryAttribution {
+  url?: string;
+  scope?: string;
+  container?: { id?: string; src?: string };
+}
+
 interface UserAgentSpecificMemory {
   bytes: number;
-  breakdown: Array<{ bytes: number; types: string[] }>;
+  breakdown: Array<{ bytes: number; types: string[]; attribution?: MemoryAttribution[] }>;
 }
 
 declare global {
