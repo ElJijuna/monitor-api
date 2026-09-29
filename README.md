@@ -121,7 +121,7 @@ apps.
 - Collection starts only after `monitor.start()`.
 - `monitor.stop()` and `monitor.destroy()` restore patched browser APIs.
 - Multiple monitor instances share network and React global hooks; the last active instance restores them.
-- Multiple monitor instances with the same `reportAllChanges` and `attribution` settings share Web Vitals observers.
+- Multiple monitor instances with the same `reportAllChanges`, `attribution`, and `softNavigations` settings share Web Vitals observers.
 - Histories are bounded by `maxHistory`.
 - Custom event payloads are copied before retention and bounded by depth and UTF-8 byte size.
 - Error collection is opt-in. Default reporting sends only error counts, not messages or stacks.
@@ -453,7 +453,9 @@ interface WebVitalMetric {
   delta: number
   rating: 'good' | 'needs-improvement' | 'poor'
   id: string
-  navigationType: string
+  navigationType: string       // 'navigate', 'reload', 'back-forward-cache', 'soft-navigation', …
+  navigationId: number         // groups reports per page view
+  navigationURL: string | null // URL of that page view, capped at 500 characters
   timestamp: number
   attribution?: ... // only with `attribution: true`, see below
 }
@@ -493,6 +495,33 @@ at 500 characters, and performance entries and DOM nodes are never retained.
 The default production report includes only the timings and categories; see
 [PRIVACY.md](PRIVACY.md). `longestScript` requires Long Animation Frame support
 (Chromium), and fields the browser cannot provide are `null`.
+
+**Soft navigations (SPAs).** Set `softNavigations: true` to measure Web Vitals
+for each route change of a single-page app, not only for the first page load.
+Browsers that detect soft navigations (Chromium 151+) treat an interaction that
+changes the URL and paints new content as a new page view: CLS and INP restart,
+FCP and LCP measure the new content, and TTFB is 0.
+
+```ts
+const monitor = createMonitor({
+  collectors: { webVitals: { softNavigations: true } },
+})
+
+monitor.webVitals.onMetric.subscribe((metric) => {
+  if (metric) {
+    console.log(metric.name, metric.value, metric.navigationType, metric.navigationURL)
+    // 'LCP' 820 'soft-navigation' 'https://app.example.com/cart'
+  }
+})
+```
+
+The latest value of each metric (`snapshot.lcp`, `snapshot.inp`, …) belongs to
+the newest navigation. The previous page's final CLS or INP can be reported
+after the new page's first metrics; it is kept in `entries` with its own
+`navigationId` but does not replace the latest value. Group `entries` by
+`navigationId` to see every page view. Other browsers ignore the option and keep
+reporting the first page load only. Enabling it also finalizes the first page's
+metrics when the first soft navigation happens.
 
 ---
 
@@ -861,6 +890,7 @@ createMonitor({
     webVitals: {
       reportAllChanges: true,  // default true
       attribution: false,      // default false; diagnostic breakdown per metric
+      softNavigations: false,  // default false; report metrics per SPA route change
     },
   },
 

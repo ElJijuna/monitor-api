@@ -39,14 +39,28 @@ interface SharedChannel {
   subscribers: Set<MetricSubscriber>;
 }
 
-type ChannelKey = `${'all' | 'final'}Changes${'' | 'WithAttribution'}`;
+interface ChannelOptions {
+  reportAllChanges: boolean;
+  attribution: boolean;
+  softNavigations: boolean;
+}
 
-const sharedChannels: Record<ChannelKey, SharedChannel> = {
-  allChanges: { registered: false, subscribers: new Set() },
-  finalChanges: { registered: false, subscribers: new Set() },
-  allChangesWithAttribution: { registered: false, subscribers: new Set() },
-  finalChangesWithAttribution: { registered: false, subscribers: new Set() },
-};
+/** One set of `web-vitals` observers per combination of options, shared by all monitors. */
+const sharedChannels = new Map<string, SharedChannel>();
+
+function getChannel({ reportAllChanges, attribution, softNavigations }: ChannelOptions) {
+  const key = `${reportAllChanges}:${attribution}:${softNavigations}`;
+
+  let channel = sharedChannels.get(key);
+
+  if (!channel) {
+    channel = { registered: false, subscribers: new Set() };
+    sharedChannels.set(key, channel);
+  }
+
+  return channel;
+}
+
 const standardApi: WebVitalsApi = {
   onCLS: onCLS as Register,
   onFCP: onFCP as Register,
@@ -60,15 +74,9 @@ function loadAttributionApi(): Promise<WebVitalsApi> {
   return import('web-vitals/attribution') as Promise<WebVitalsApi>;
 }
 
-function subscribeToWebVitals(
-  subscriber: MetricSubscriber,
-  reportAllChanges: boolean,
-  attribution: boolean,
-): () => void {
-  const channel =
-    sharedChannels[
-      `${reportAllChanges ? 'all' : 'final'}Changes${attribution ? 'WithAttribution' : ''}`
-    ];
+function subscribeToWebVitals(subscriber: MetricSubscriber, options: ChannelOptions): () => void {
+  const { reportAllChanges, attribution, softNavigations } = options;
+  const channel = getChannel(options);
 
   channel.subscribers.add(subscriber);
 
@@ -81,7 +89,9 @@ function subscribeToWebVitals(
       }
     };
     const register = (api: WebVitalsApi) => {
-      const opts = { reportAllChanges };
+      const opts: ReportOpts = softNavigations
+        ? { reportAllChanges, reportSoftNavs: true }
+        : { reportAllChanges };
 
       api.onCLS(publish, opts);
       api.onFCP(publish, opts);
@@ -234,11 +244,11 @@ export class WebVitalsCollector implements IWebVitalsCollector {
     }
 
     this.#started = true;
-    this.#unsubscribe = subscribeToWebVitals(
-      (metric) => this.#record(metric),
-      this.config.reportAllChanges,
-      this.config.attribution === true,
-    );
+    this.#unsubscribe = subscribeToWebVitals((metric) => this.#record(metric), {
+      reportAllChanges: this.config.reportAllChanges,
+      attribution: this.config.attribution === true,
+      softNavigations: this.config.softNavigations === true,
+    });
   }
 
   stop(): void {
@@ -274,6 +284,8 @@ export class WebVitalsCollector implements IWebVitalsCollector {
       rating: metric.rating,
       id: metric.id,
       navigationType: metric.navigationType,
+      navigationId: metric.navigationId,
+      navigationURL: boundedString(metric.navigationURL),
       timestamp: Date.now(),
     };
     const attribution = this.config.attribution ? summarizeAttribution(metric) : undefined;
@@ -282,11 +294,20 @@ export class WebVitalsCollector implements IWebVitalsCollector {
       nextMetric.attribution = attribution;
     }
 
-    this.#snapshot.value = (prev: WebVitalsSnapshot): WebVitalsSnapshot => ({
-      ...prev,
-      [nextMetric.name.toLowerCase()]: nextMetric,
-      entries: appendHistory(prev.entries, [nextMetric], this.config.maxHistory),
-    });
+    this.#snapshot.value = (prev: WebVitalsSnapshot): WebVitalsSnapshot => {
+      const key = nextMetric.name.toLowerCase() as Lowercase<WebVitalName>;
+      const latest = prev[key];
+      const entries = appendHistory(prev.entries, [nextMetric], this.config.maxHistory);
+
+      // With soft navigations, a previous page's final CLS or INP can arrive after the new page's
+      // first reports. It is kept in the history, but the latest value stays on the newest page.
+      if (latest && latest.navigationId > nextMetric.navigationId) {
+        return { ...prev, entries };
+      }
+
+      return { ...prev, [key]: nextMetric, entries };
+    };
+
     this.onMetric.value = nextMetric;
   }
 }

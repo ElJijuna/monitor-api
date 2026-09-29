@@ -597,3 +597,126 @@ test('the default report summarizes CLS, FCP and TTFB attribution and memory usa
     Reflect.deleteProperty(globalThis.performance, 'memory');
   }
 });
+
+describe('soft navigations', () => {
+  function onNavigation(
+    base: MetricType,
+    navigationId: number,
+    navigationURL?: string,
+    navigationType: MetricType['navigationType'] = 'soft-navigation',
+  ): MetricType {
+    return { ...base, navigationId, navigationType, navigationURL } as MetricType;
+  }
+
+  test('registers a separate observer channel with reportSoftNavs', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    const soft = createMonitor({
+      collectors: { webVitals: { softNavigations: true, reportAllChanges: false } },
+    });
+
+    try {
+      soft.start();
+
+      expect(webVitals.onLCP).toHaveBeenCalledTimes(1);
+      expect(webVitals.onLCP).toHaveBeenCalledWith(expect.any(Function), {
+        reportAllChanges: false,
+        reportSoftNavs: true,
+      });
+    } finally {
+      soft.destroy();
+    }
+  });
+
+  test('keeps the newest navigation as the latest value and older reports in the history', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    const monitor = createMonitor({
+      collectors: { webVitals: { softNavigations: true, reportAllChanges: true } },
+    });
+
+    try {
+      monitor.start();
+      callbacks.get('CLS')?.(
+        onNavigation(metric('CLS', 0.05), 1, 'https://app.example.com/', 'navigate'),
+      );
+      callbacks.get('LCP')?.(onNavigation(metric('LCP', 800), 2, 'https://app.example.com/cart'));
+      callbacks.get('CLS')?.(onNavigation(metric('CLS', 0.01), 2, 'https://app.example.com/cart'));
+      // The first page's final CLS arrives after the soft navigation started.
+      callbacks.get('CLS')?.(
+        onNavigation(metric('CLS', 0.2), 1, 'https://app.example.com/', 'navigate'),
+      );
+
+      const snapshot = monitor.webVitals.snapshot.value;
+
+      expect(snapshot.cls).toMatchObject({
+        value: 0.01,
+        navigationId: 2,
+        navigationType: 'soft-navigation',
+        navigationURL: 'https://app.example.com/cart',
+      });
+      expect(snapshot.lcp).toMatchObject({ value: 800, navigationId: 2 });
+      expect(
+        snapshot.entries.map(({ name, value, navigationId }) => [name, value, navigationId]),
+      ).toEqual([
+        ['CLS', 0.05, 1],
+        ['LCP', 800, 2],
+        ['CLS', 0.01, 2],
+        ['CLS', 0.2, 1],
+      ]);
+      expect(monitor.webVitals.onMetric.value).toMatchObject({ value: 0.2, navigationId: 1 });
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('caps navigation URLs and reports null when the browser omits them', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    const monitor = createMonitor({
+      collectors: { webVitals: { softNavigations: true, reportAllChanges: true } },
+    });
+
+    try {
+      monitor.start();
+      callbacks.get('FCP')?.(
+        onNavigation(metric('FCP', 300), 3, `https://app.example.com/${'a'.repeat(900)}`),
+      );
+      callbacks.get('TTFB')?.(onNavigation(metric('TTFB', 0), 3));
+
+      const { fcp, ttfb } = monitor.webVitals.snapshot.value;
+
+      expect(fcp?.navigationURL).toHaveLength(500);
+      expect(ttfb?.navigationURL).toBeNull();
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('the default report leaves navigation URLs and ids out', async () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+    const transport = jest.fn<(request: { body: string }) => void>();
+    const monitor = createMonitor({
+      env: 'production',
+      collectors: { webVitals: { softNavigations: true, reportAllChanges: true } },
+      report: { endpoint: '/metrics', interval: 60_000, transport, flushOnHide: false },
+    });
+
+    try {
+      monitor.start();
+      callbacks.get('LCP')?.(
+        onNavigation(metric('LCP', 900), 4, 'https://app.example.com/orders/42?token=secret'),
+      );
+
+      expect(await monitor.reporter.flush()).toBe(true);
+
+      const body = transport.mock.calls[0]?.[0].body ?? '';
+
+      expect(JSON.parse(body)).toMatchObject({ webVitals: { lcp: { value: 900 } } });
+      expect(body).not.toMatch(/example\.com|secret|navigationId|soft-navigation/);
+    } finally {
+      monitor.destroy();
+    }
+  });
+});
