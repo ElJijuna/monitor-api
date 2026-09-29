@@ -9,7 +9,7 @@ third-party analytics endpoint.
 
 | Collector | Data kept in memory | Data sent by the default reporter |
 | --- | --- | --- |
-| Performance | FPS, heap percentage when available, long-task and CLS aggregates; recent long animation frames with phase timings and, for their five longest scripts, the invoker, invoker type, source URL, and function name | Current values and aggregates; long animation frame counters only (count, total and maximum blocking duration) |
+| Performance | FPS, heap percentage when available, measured page memory by type in cross-origin isolated pages (frame and worker URLs are discarded), long-task and CLS aggregates; recent long animation frames with phase timings and, for their five longest scripts, the invoker, invoker type, source URL, and function name | Current values and aggregates, including the measured memory total but not its per-type breakdown; long animation frame counters only (count, total and maximum blocking duration) |
 | Network | Request URL, method, status, duration, type, and timestamp | Five-second aggregate only |
 | React | Component names, render durations, commits, and derived counts | Commit, truncation, and slow-render counts only |
 | Events | Application labels and serializable custom payloads | Retained event count only |

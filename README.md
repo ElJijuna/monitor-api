@@ -143,6 +143,17 @@ FPS and memory are sampled only while the page is visible: memory is read every 
 samplers pause while `document.visibilityState` is `hidden` or the page is frozen, so `fpsHistory` and
 `memoryHistory` reflect visible time only. Sampling resumes on `visibilitychange`, `resume`, or `pageshow`.
 
+In cross-origin isolated pages (served with `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` or `credentialless`), Chromium also exposes
+[`performance.measureUserAgentSpecificMemory()`](https://developer.mozilla.org/docs/Web/API/Performance/measureUserAgentSpecificMemory).
+It counts all the memory the page uses, including the DOM, same-origin iframes, and workers, not only
+the JavaScript heap. `memoryMeasurement` reports the total and a per-type breakdown in megabytes. The
+first measurement runs on `start()`, and later ones follow at randomized delays averaging
+`memoryMeasurementInterval` (five minutes by default; `false` disables it) while the page is visible.
+The browser answers at its next garbage collection, so each result can take tens of seconds. See
+[Enabling page memory measurement](#enabling-page-memory-measurement) before adding these headers:
+they can break cross-origin content.
+
 ```ts
 monitor.start()
 
@@ -156,6 +167,13 @@ monitor.performance.memory.subscribe((mem) => {
     console.log(`Memory: ${mem.used}MB / ${mem.total}MB (${mem.percent}%)`)
   } else {
     console.log('Memory API not available (non-Chrome browser)')
+  }
+})
+
+// Cross-origin isolated Chromium pages only; null elsewhere and until the first result
+monitor.performance.memoryMeasurement.subscribe((measurement) => {
+  if (measurement) {
+    console.log(`Page memory: ${measurement.total}MB`, measurement.byType) // { JavaScript: 38.2, DOM: 6.1, ... }
   }
 })
 
@@ -188,6 +206,7 @@ monitor.performance.snapshot.subscribe((snap) => {
     fpsHistory: [60, 59, 58],
     memory: { used: 45.2, total: 2048, percent: 2.2 },
     memoryHistory: [2.1, 2.2, 2.2],
+    memoryMeasurement: { total: 52.4, byType: { JavaScript: 44.3, DOM: 8.1 }, timestamp: 1767225600000 },
     longTasks: { count: 3, lastDuration: 82.5 },
     longAnimationFrames: { count: 2, totalBlockingDuration: 140, maxBlockingDuration: 90, entries: [...] },
     cls: 0.0023
@@ -207,6 +226,7 @@ interface PerformanceSnapshot {
   fpsHistory: number[]
   memory: { used: number; total: number; percent: number } | null
   memoryHistory: number[]
+  memoryMeasurement: { total: number; byType: Record<string, number>; timestamp: number } | null
   longTasks: { count: number; lastDuration: number | null }
   longAnimationFrames: {
     count: number
@@ -240,6 +260,78 @@ interface LongAnimationFrameEntry {
 > **Long Animation Frames** need a browser with the [Long Animation Frames API](https://developer.chrome.com/docs/web-platform/long-animation-frames) (Chromium 123+); elsewhere `longAnimationFrames` stays empty. Frames from page load are included on the first `start()`. Script strings are capped at 500 characters and stay in the browser: the default production report sends only `count`, `totalBlockingDuration` and `maxBlockingDuration`.
 
 > **Note:** `memory` is `null` on non-Chrome browsers. `actualDuration` for React components requires a dev build or `react-dom/profiling` in production.
+
+#### Enabling page memory measurement
+
+`memoryMeasurement` needs a cross-origin isolated page. Serve the HTML document with both headers:
+
+```http
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+These headers change how the whole page loads, not only the monitor. Check the effects below before
+enabling them in production; the library works without them, with `memoryMeasurement` left `null`.
+
+**What can break:**
+
+- **`Cross-Origin-Embedder-Policy: require-corp`** blocks every cross-origin image, font, script,
+  stylesheet, and iframe unless its server opts in, either with `Cross-Origin-Resource-Policy:
+  cross-origin` or through CORS (a `crossorigin` attribute plus `Access-Control-Allow-Origin`).
+  Third-party CDNs, analytics tags, ads, and embedded videos or maps often do not. Worker scripts
+  need the `Cross-Origin-Embedder-Policy` header too.
+- **`Cross-Origin-Embedder-Policy: credentialless`** is the less strict alternative: cross-origin
+  requests without CORS still load, but without cookies. It is supported in Chromium 96+ and
+  Firefox 119+, which covers `measureUserAgentSpecificMemory()` since that API is Chromium-only,
+  but not Safari. Content that depends on third-party cookies stops working.
+- **`Cross-Origin-Opener-Policy: same-origin`** separates the page from cross-origin windows it
+  opens or was opened by. Popups for OAuth sign-in or payments that report back through
+  `window.opener` lose that reference.
+
+To find breakages without enforcing anything, send the report-only variants first
+(`Cross-Origin-Embedder-Policy-Report-Only` and `Cross-Origin-Opener-Policy-Report-Only`) and watch
+the DevTools console for violations.
+
+**Configuration examples:**
+
+```js
+// Express
+app.use((req, res, next) => {
+  res.set('Cross-Origin-Opener-Policy', 'same-origin')
+  res.set('Cross-Origin-Embedder-Policy', 'require-corp')
+  next()
+})
+```
+
+```nginx
+# nginx
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+add_header Cross-Origin-Embedder-Policy "require-corp" always;
+```
+
+```js
+// vite.config.js (dev server and `vite preview`)
+const isolation = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+}
+
+export default { server: { headers: isolation }, preview: { headers: isolation } }
+```
+
+```text
+# Netlify and Cloudflare Pages: _headers
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+```
+
+**Verifying:**
+
+Run `self.crossOriginIsolated` in the DevTools console of the page: it must return `true`. In
+Chromium, the **Application › Frames** panel also shows the isolation status and which resources
+were blocked. Once isolated, `monitor.performance.memoryMeasurement` receives its first value
+within about 20 seconds of `start()`.
 
 ---
 
@@ -867,7 +959,8 @@ keepalive, signal })` can replace `fetch`; without either transport, the reporte
 start.
 
 Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
-snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;
+snapshot timestamp; current FPS, memory percentage, measured page memory total,
+long-task and CLS aggregates;
 the five-second network aggregate; React commit counts; the retained custom-event
 count; retained error counters; Web Vital values, deltas, and ratings; and the
 logical processor count, online status, and offline transition count. It
@@ -911,7 +1004,9 @@ createMonitor({
   // Or configure each individually. Collectors missing from the object are
   // disabled, so list every collector you want to keep.
   collectors: {
-    performance: true,
+    performance: {
+      memoryMeasurementInterval: 300_000, // default 5 min mean; false disables
+    },
     network: { filter: (url) => !url.includes('/analytics') },
     react: {
       slowThreshold: 8,            // default 16ms

@@ -9,15 +9,15 @@ Items are grouped by area and ordered by priority within each group.
 
 ## Memory
 
-- [ ] **`performance.measureUserAgentSpecificMemory()`**: accurate page memory
-  broken down by type (JavaScript, DOM) and by frame or worker. It replaces the
-  deprecated, coarsely rounded `performance.memory`.
-  - Chromium 89+ only, and only when the page is cross-origin isolated
-    (`crossOriginIsolated === true`, which requires the COOP and COEP headers).
-  - Returns a Promise that can take several seconds to resolve, so it cannot share
-    the synchronous memory interval.
-  - Fall back to `performance.memory` when it is unavailable, and record which
-    source produced each value.
+- [x] **`performance.measureUserAgentSpecificMemory()`**: exposed as
+  `performance.memoryMeasurement` (total and per-type megabytes) in cross-origin
+  isolated Chromium pages, measured at randomized intervals while visible. It is a
+  separate field rather than a fallback for `memory`, because it has no heap limit
+  to compute `percent` from. The default reporter sends the total as
+  `measuredMemory`.
+- [ ] **Per-frame and per-worker memory**: the measurement's `attribution` (which
+  frame or worker holds the memory) is dropped because it contains URLs. Expose it
+  locally with URL limits, as long animation frame scripts do.
 - [ ] **`navigator.deviceMemory`**: approximate device RAM in GB (0.25–8). Chromium
   only. Useful for segmenting metrics by device class.
 - [ ] **`navigator.storage.estimate()`**: storage `usage` and `quota` (IndexedDB,
@@ -81,13 +81,12 @@ those metrics do not expose.
 
 ## Suggested order
 
-1. Memory: add `measureUserAgentSpecificMemory()` with a fallback to
-   `performance.memory`, and add `deviceMemory` as context.
-2. Extend `DeviceCollector` (which already reports `hardwareConcurrency` and online status) with
-   `deviceMemory`, `navigator.connection`, and
+1. Extend `DeviceCollector` (which already reports `hardwareConcurrency` and
+   online status) with `deviceMemory`, `navigator.connection`, and
    `storage.estimate()`. These APIs are cheap and add context to every other
    metric.
-3. `navigation` timing and the Reporting API.
-4. Compute Pressure, Battery, and the remaining performance entry types.
+2. `navigation` timing and the Reporting API.
+3. Compute Pressure, Battery, per-frame memory, and the remaining performance
+   entry types.
 
 Update [COMPATIBILITY.md](COMPATIBILITY.md) as each item ships.

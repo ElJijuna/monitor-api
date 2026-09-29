@@ -13,6 +13,7 @@ three browser engines through Playwright on every pull request.
 | Web Vitals attribution | Tested | Feature detected | Feature detected | Fields the engine cannot measure are `null` |
 | FPS | Tested | Tested | Tested | Requires `requestAnimationFrame` |
 | JS heap memory | Supported | `null` | `null` | Chromium-only `performance.memory` |
+| Page memory measurement | Feature detected | `null` | `null` | Chromium-only `measureUserAgentSpecificMemory()`, only in cross-origin isolated pages (COOP and COEP headers; see [Enabling page memory measurement](README.md#enabling-page-memory-measurement)) |
 | Logical processor count | Supported | Supported | Supported | `null` where `navigator.hardwareConcurrency` is absent |
 | Online status | Supported | Supported | Supported | `null` where `navigator.onLine` is absent |
 | Long Tasks | Feature detected | Feature detected | Feature detected | Empty aggregate when unsupported |

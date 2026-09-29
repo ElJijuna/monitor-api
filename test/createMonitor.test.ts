@@ -642,7 +642,7 @@ test('the default report sends null memory and web vitals before any measurement
     monitor.start();
     expect(await monitor.reporter.flush()).toBe(true);
     expect(transport.mock.calls[0]?.[0].payload).toMatchObject({
-      performance: { memoryPercent: null },
+      performance: { memoryPercent: null, measuredMemory: null },
       webVitals: { cls: null, fcp: null, inp: null, lcp: null, ttfb: null },
     });
     expect(transport.mock.calls[0]?.[0].payload).not.toHaveProperty('resources');

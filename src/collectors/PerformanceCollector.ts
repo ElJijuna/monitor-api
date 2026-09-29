@@ -7,12 +7,15 @@ import type {
   LongAnimationFrameScript,
   LongTaskInfo,
   MemoryInfo,
+  MemoryMeasurement,
   PerformanceCollectorConfig,
   PerformanceSnapshot,
 } from '../core/types';
 
 const MAX_LOAF_SCRIPTS = 5;
 const MAX_LOAF_STRING = 500;
+const DEFAULT_MEMORY_MEASUREMENT_INTERVAL_MS = 300_000;
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /** The fields read from a `PerformanceScriptTiming`, which TypeScript's DOM lib does not declare. */
 interface ScriptTiming {
@@ -43,6 +46,63 @@ const emptyLongAnimationFrames = (): LongAnimationFrameInfo => ({
 
 function isHidden(): boolean {
   return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+function normalizeMeasurementInterval(value: number | false | undefined): number | false {
+  if (value === undefined) {
+    return DEFAULT_MEMORY_MEASUREMENT_INTERVAL_MS;
+  }
+
+  if (value !== false && !(Number.isFinite(value) && value > 0)) {
+    throw new RangeError(
+      'performance.memoryMeasurementInterval must be a positive finite number or false',
+    );
+  }
+
+  return value;
+}
+
+/** The API exists only in cross-origin isolated pages; elsewhere it throws a SecurityError. */
+function canMeasureMemory(): boolean {
+  return (
+    typeof performance !== 'undefined' &&
+    typeof performance.measureUserAgentSpecificMemory === 'function' &&
+    globalThis.crossOriginIsolated === true
+  );
+}
+
+/** Exponentially distributed delay, so measurements do not align with periodic work. */
+function randomMeasurementDelay(mean: number): number {
+  return Math.min(-Math.log(1 - Math.random()) * mean, mean * 10, MAX_TIMEOUT_MS);
+}
+
+function toMegabytes(bytes: number): number {
+  return Math.round((bytes / 1_048_576) * 10) / 10;
+}
+
+function summarizeMeasurement(result: UserAgentSpecificMemory): MemoryMeasurement {
+  const bytesByType = new Map<string, number>();
+
+  for (const entry of Array.isArray(result.breakdown) ? result.breakdown : []) {
+    if (!(entry.bytes > 0)) {
+      continue;
+    }
+
+    const types = Array.isArray(entry.types)
+      ? entry.types.filter((t) => typeof t === 'string')
+      : [];
+    const key = types.length > 0 ? types.join('+') : 'Other';
+
+    bytesByType.set(key, (bytesByType.get(key) ?? 0) + entry.bytes);
+  }
+
+  const byType: Record<string, number> = {};
+
+  for (const [type, bytes] of bytesByType) {
+    byType[type] = toMegabytes(bytes);
+  }
+
+  return { total: toMegabytes(finiteOrZero(result.bytes)), byType, timestamp: Date.now() };
 }
 
 function boundedString(value: unknown): string | null {
@@ -80,6 +140,11 @@ function summarizeFrame(frame: AnimationFrameTiming): LongAnimationFrameEntry {
   };
 }
 
+interface UserAgentSpecificMemory {
+  bytes: number;
+  breakdown: Array<{ bytes: number; types: string[] }>;
+}
+
 declare global {
   interface Performance {
     memory?: {
@@ -87,6 +152,7 @@ declare global {
       totalJSHeapSize: number;
       jsHeapSizeLimit: number;
     };
+    measureUserAgentSpecificMemory?: () => Promise<UserAgentSpecificMemory>;
   }
 }
 
@@ -96,6 +162,7 @@ export class PerformanceCollector implements IPerformanceCollector {
   readonly fpsHistory: SSignal<number[]>;
   readonly memory: SSignal<MemoryInfo | null>;
   readonly memoryHistory: SSignal<number[]>;
+  readonly memoryMeasurement: SSignal<MemoryMeasurement | null>;
   readonly longTasks: SSignal<LongTaskInfo>;
   readonly longAnimationFrames: SSignal<LongAnimationFrameInfo>;
   readonly cls: SSignal<number>;
@@ -111,6 +178,10 @@ export class PerformanceCollector implements IPerformanceCollector {
   /** `performance.now()` of the latest restart; buffered frames before it were already counted. */
   #loafAcceptFrom = 0;
   #memoryInterval: ReturnType<typeof setInterval> | null = null;
+  #measurementInterval: number | false;
+  #measurementTimeout: ReturnType<typeof setTimeout> | null = null;
+  #measuring = false;
+  #measurementFailed = false;
   #started = false;
   #generation = 0;
   #clsSessionValue = 0;
@@ -119,10 +190,12 @@ export class PerformanceCollector implements IPerformanceCollector {
 
   constructor(private readonly config: PerformanceCollectorConfig) {
     validateMaxHistory(config.maxHistory);
+    this.#measurementInterval = normalizeMeasurementInterval(config.memoryMeasurementInterval);
     this.fps = new SSignal(0);
     this.fpsHistory = new SSignal<number[]>([]);
     this.memory = new SSignal<MemoryInfo | null>(this.#readMemory());
     this.memoryHistory = new SSignal<number[]>([]);
+    this.memoryMeasurement = new SSignal<MemoryMeasurement | null>(null);
     this.longTasks = new SSignal<LongTaskInfo>({ count: 0, lastDuration: null });
     this.longAnimationFrames = new SSignal(emptyLongAnimationFrames());
     this.cls = new SSignal(0);
@@ -133,6 +206,7 @@ export class PerformanceCollector implements IPerformanceCollector {
         this.fpsHistory,
         this.memory,
         this.memoryHistory,
+        this.memoryMeasurement,
         this.longTasks,
         this.longAnimationFrames,
         this.cls,
@@ -142,6 +216,7 @@ export class PerformanceCollector implements IPerformanceCollector {
         fpsHistory,
         memory,
         memoryHistory,
+        memoryMeasurement,
         longTasks,
         longAnimationFrames,
         cls,
@@ -150,6 +225,7 @@ export class PerformanceCollector implements IPerformanceCollector {
         fpsHistory,
         memory,
         memoryHistory,
+        memoryMeasurement,
         longTasks,
         longAnimationFrames,
         cls,
@@ -167,6 +243,7 @@ export class PerformanceCollector implements IPerformanceCollector {
     }
 
     this.#started = true;
+    this.#measurementFailed = false;
 
     this.#listenLifecycle('addEventListener');
 
@@ -183,6 +260,8 @@ export class PerformanceCollector implements IPerformanceCollector {
     this.#listenLifecycle('removeEventListener');
 
     this.#generation += 1;
+    // A measurement still in flight belongs to the old generation and is discarded.
+    this.#measuring = false;
     this.#clsSessionValue = 0;
     this.#frameCount = 0;
     this.#lastFpsTime = 0;
@@ -314,7 +393,13 @@ export class PerformanceCollector implements IPerformanceCollector {
 
   /** Samples memory every two seconds while the page is visible; hidden time is not recorded. */
   #startMemory(): void {
-    if (this.#memoryInterval !== null || isHidden()) {
+    if (isHidden()) {
+      return;
+    }
+
+    this.#scheduleMeasurement();
+
+    if (this.#memoryInterval !== null) {
       return;
     }
 
@@ -343,6 +428,67 @@ export class PerformanceCollector implements IPerformanceCollector {
       clearInterval(this.#memoryInterval);
       this.#memoryInterval = null;
     }
+
+    if (this.#measurementTimeout !== null) {
+      clearTimeout(this.#measurementTimeout);
+      this.#measurementTimeout = null;
+    }
+  }
+
+  /** Measures right away the first time, then after randomized delays while visible. */
+  #scheduleMeasurement(): void {
+    const mean = this.#measurementInterval;
+
+    if (
+      mean === false ||
+      !this.#started ||
+      isHidden() ||
+      this.#measuring ||
+      this.#measurementFailed ||
+      this.#measurementTimeout !== null ||
+      !canMeasureMemory()
+    ) {
+      return;
+    }
+
+    const delay = this.memoryMeasurement.value === null ? 0 : randomMeasurementDelay(mean);
+
+    this.#measurementTimeout = setTimeout(() => {
+      this.#measurementTimeout = null;
+      void this.#measure();
+    }, delay);
+  }
+
+  /** The browser resolves at its next garbage collection, which can take tens of seconds. */
+  async #measure(): Promise<void> {
+    const generation = this.#generation;
+    const measure =
+      performance.measureUserAgentSpecificMemory as () => Promise<UserAgentSpecificMemory>;
+
+    let measurement: UserAgentSpecificMemory | null = null;
+
+    this.#measuring = true;
+
+    try {
+      measurement = await measure.call(performance);
+    } catch {
+      // Rejections are not transient (for example a lost cross-origin isolation); retry on the next start().
+    }
+
+    if (generation !== this.#generation) {
+      return;
+    }
+
+    this.#measuring = false;
+
+    if (measurement === null) {
+      this.#measurementFailed = true;
+
+      return;
+    }
+
+    this.memoryMeasurement.value = summarizeMeasurement(measurement);
+    this.#scheduleMeasurement();
   }
 
   #startLongTasks(): void {

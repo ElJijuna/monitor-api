@@ -32,6 +32,7 @@ export type {
   LongAnimationFrameScript,
   LongTaskInfo,
   MemoryInfo,
+  MemoryMeasurement,
   // Core
   Monitor,
   MonitorConfig,

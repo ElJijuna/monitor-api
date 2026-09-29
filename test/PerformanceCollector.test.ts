@@ -905,3 +905,192 @@ describe('paired updates', () => {
     }
   });
 });
+
+describe('memory measurement', () => {
+  type Measure = () => Promise<{
+    bytes: number;
+    breakdown: Array<{ bytes: number; types: string[] }>;
+  }>;
+
+  const MB = 1_048_576;
+  const measurement = (bytes: number) => ({
+    bytes,
+    breakdown: [
+      { bytes: bytes / 2, types: ['JavaScript'] },
+      { bytes: bytes / 4, types: ['DOM'] },
+      { bytes: bytes / 8, types: ['JavaScript'] },
+      { bytes: bytes / 8, types: [] },
+      { bytes: 0, types: ['Shared'] },
+    ],
+  });
+
+  function installMeasure(measure: Measure, isolated = true) {
+    Object.defineProperty(globalThis.performance, 'measureUserAgentSpecificMemory', {
+      configurable: true,
+      value: jest.fn(measure),
+    });
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+      configurable: true,
+      value: isolated,
+    });
+
+    return globalThis.performance.measureUserAgentSpecificMemory as jest.Mock<Measure>;
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis.performance, 'measureUserAgentSpecificMemory');
+    Reflect.deleteProperty(globalThis, 'crossOriginIsolated');
+    jest.restoreAllMocks();
+  });
+
+  test('measures on start, summarizes by type, and repeats after a randomized delay', async () => {
+    const browser = installPerformanceBrowser();
+    const measure = installMeasure(async () => measurement(16 * MB));
+
+    // An exponential delay with mean 10,000 ms: -ln(1 - 0.5) * 10,000 ≈ 6,931 ms.
+    jest.spyOn(Math, 'random').mockReturnValue(0.5);
+
+    try {
+      const monitor = createMonitor({
+        collectors: { performance: { memoryMeasurementInterval: 10_000 } },
+      });
+
+      monitor.start();
+      expect(monitor.performance.memoryMeasurement.value).toBeNull();
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(1);
+      expect(monitor.getSnapshot().performance.memoryMeasurement).toEqual({
+        total: 16,
+        byType: { JavaScript: 10, DOM: 4, Other: 2 },
+        timestamp: expect.any(Number),
+      });
+
+      await jest.advanceTimersByTimeAsync(6_900);
+      expect(measure).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(100);
+      expect(measure).toHaveBeenCalledTimes(2);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('does not measure without cross-origin isolation or when disabled', async () => {
+    const browser = installPerformanceBrowser();
+    const measure = installMeasure(async () => measurement(MB), false);
+
+    try {
+      const notIsolated = createMonitor({ collectors: { performance: true } });
+
+      notIsolated.start();
+      await jest.advanceTimersByTimeAsync(1_000);
+      notIsolated.destroy();
+
+      Object.defineProperty(globalThis, 'crossOriginIsolated', { configurable: true, value: true });
+
+      const disabled = createMonitor({
+        collectors: { performance: { memoryMeasurementInterval: false } },
+      });
+
+      disabled.start();
+      await jest.advanceTimersByTimeAsync(1_000);
+      disabled.destroy();
+
+      expect(measure).not.toHaveBeenCalled();
+      expect(() =>
+        createMonitor({ collectors: { performance: { memoryMeasurementInterval: 0 } } }),
+      ).toThrow(RangeError);
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('waits while hidden and never overlaps an in-flight measurement', async () => {
+    const browser = installPerformanceBrowser();
+    const { document, listeners } = installDocument('hidden');
+
+    let resolve: (value: ReturnType<typeof measurement>) => void = () => {};
+
+    const measure = installMeasure(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(measure).not.toHaveBeenCalled();
+
+      document.visibilityState = 'visible';
+      listeners.get('visibilitychange')?.();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(1);
+
+      // Hiding and showing again while the browser has not answered starts no second call.
+      document.visibilityState = 'hidden';
+      listeners.get('visibilitychange')?.();
+      document.visibilityState = 'visible';
+      listeners.get('visibilitychange')?.();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(1);
+
+      resolve(measurement(8 * MB));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(monitor.performance.memoryMeasurement.value?.total).toBe(8);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('discards results that resolve after stop and stops retrying after a rejection', async () => {
+    const browser = installPerformanceBrowser();
+
+    let resolve: (value: ReturnType<typeof measurement>) => void = () => {};
+
+    const measure = installMeasure(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+      monitor.stop();
+      resolve(measurement(8 * MB));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(monitor.performance.memoryMeasurement.value).toBeNull();
+
+      measure.mockImplementation(() => Promise.reject(new DOMException('', 'SecurityError')));
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(2);
+
+      await jest.advanceTimersByTimeAsync(3_600_000);
+      expect(measure).toHaveBeenCalledTimes(2);
+
+      // A new start() tries again.
+      measure.mockImplementation(async () => measurement(4 * MB));
+      monitor.stop();
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(3);
+      expect(monitor.performance.memoryMeasurement.value?.total).toBe(4);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+});

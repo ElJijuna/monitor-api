@@ -10,6 +10,23 @@ export interface MemoryInfo {
   percent: number;
 }
 
+/**
+ * Memory attributed to the page by `performance.measureUserAgentSpecificMemory()`, available in
+ * Chromium only when the page is cross-origin isolated.
+ */
+export interface MemoryMeasurement {
+  /** Total memory in megabytes used by the page, its same-origin iframes, and its workers. */
+  total: number;
+  /**
+   * Megabytes by memory type, such as `JavaScript`, `DOM`, or `Shared`. Memory the browser
+   * attributes to several types is keyed by the types joined with `+`, and untyped memory by
+   * `Other`.
+   */
+  byType: Record<string, number>;
+  /** Unix timestamp in milliseconds when the measurement resolved. */
+  timestamp: number;
+}
+
 /** Aggregate information about observed long tasks. */
 export interface LongTaskInfo {
   /** Number of long task entries observed since the collector started. */
@@ -81,6 +98,11 @@ export interface PerformanceSnapshot {
   memory: MemoryInfo | null;
   /** Recent memory usage percentages, capped by `maxHistory`. */
   memoryHistory: number[];
+  /**
+   * Latest page memory measurement, or null before the first one resolves and where
+   * `performance.measureUserAgentSpecificMemory()` is unavailable.
+   */
+  memoryMeasurement: MemoryMeasurement | null;
   /** Long task counter and last observed duration. */
   longTasks: LongTaskInfo;
   /**
@@ -96,6 +118,12 @@ export interface PerformanceSnapshot {
 export interface PerformanceCollectorConfig {
   /** Maximum number of FPS and memory history points to retain. */
   maxHistory: number;
+  /**
+   * Mean delay in milliseconds between `measureUserAgentSpecificMemory()` calls. Delays are
+   * randomized around this mean, as the API's authors recommend, so measurements do not align
+   * with periodic application work. Defaults to 300,000 (five minutes). Use `false` to disable.
+   */
+  memoryMeasurementInterval?: number | false;
 }
 
 /** Public API exposed by the performance collector. */
@@ -108,6 +136,8 @@ export interface IPerformanceCollector {
   memory: SSignal<MemoryInfo | null>;
   /** Signal containing retained memory percentage history. */
   memoryHistory: SSignal<number[]>;
+  /** Signal containing the latest page memory measurement, or null when unavailable. */
+  memoryMeasurement: SSignal<MemoryMeasurement | null>;
   /** Signal containing long task summary information. */
   longTasks: SSignal<LongTaskInfo>;
   /** Signal containing long animation frame counters and recent frames. */

@@ -71,6 +71,8 @@ function createDefaultReportPayload(snap: MonitorSnapshot, includeResources: boo
     performance: {
       fps: snap.performance.fps,
       memoryPercent: snap.performance.memory?.percent ?? null,
+      // Total megabytes only: the per-type breakdown stays local.
+      measuredMemory: snap.performance.memoryMeasurement?.total ?? null,
       longTasks: snap.performance.longTasks,
       // Counters only: script URLs and invokers stay local.
       longAnimationFrames: {

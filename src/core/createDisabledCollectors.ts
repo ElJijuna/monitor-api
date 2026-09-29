@@ -13,6 +13,7 @@ import type {
   LongAnimationFrameInfo,
   LongTaskInfo,
   MemoryInfo,
+  MemoryMeasurement,
   MonitorError,
   MonitorEvent,
   NetworkEntry,
@@ -31,6 +32,7 @@ export function createDisabledPerformanceCollector(): IPerformanceCollector {
   const fpsHistory = new SSignal<number[]>([]);
   const memory = new SSignal<MemoryInfo | null>(null);
   const memoryHistory = new SSignal<number[]>([]);
+  const memoryMeasurement = new SSignal<MemoryMeasurement | null>(null);
   const longTasks = new SSignal<LongTaskInfo>({ count: 0, lastDuration: null });
   const longAnimationFrames = new SSignal<LongAnimationFrameInfo>({
     count: 0,
@@ -44,6 +46,7 @@ export function createDisabledPerformanceCollector(): IPerformanceCollector {
     fpsHistory: [],
     memory: null,
     memoryHistory: [],
+    memoryMeasurement: null,
     longTasks: { count: 0, lastDuration: null },
     longAnimationFrames: longAnimationFrames.value,
     cls: 0,
@@ -54,6 +57,7 @@ export function createDisabledPerformanceCollector(): IPerformanceCollector {
     fpsHistory,
     memory,
     memoryHistory,
+    memoryMeasurement,
     longTasks,
     longAnimationFrames,
     cls,
