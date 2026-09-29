@@ -636,26 +636,33 @@ after `stop()`, a new `start()` records only resources that finish after it.
 
 ### DeviceCollector
 
-Reads static capabilities of the device running the page, useful for segmenting
-the other metrics by device class. It is enabled by default and reads its values
-once on `start()`.
+Reports the capabilities and connectivity of the device running the page, useful
+for segmenting the other metrics by device class and for explaining failed
+requests. It is enabled by default.
 
 ```ts
 monitor.start()
 
-const { hardwareConcurrency } = monitor.device.snapshot.value
-
-console.log('Logical processors:', hardwareConcurrency ?? 'n/a')
+monitor.device.snapshot.subscribe(({ hardwareConcurrency, online, offlineCount }) => {
+  console.log('Logical processors:', hardwareConcurrency ?? 'n/a')
+  console.log(online === false ? 'Offline' : 'Online', `(went offline ${offlineCount} times)`)
+})
 ```
 
 ```ts
 interface DeviceSnapshot {
   hardwareConcurrency: number | null // navigator.hardwareConcurrency
+  online: boolean | null             // navigator.onLine, updated on online/offline events
+  offlineCount: number               // offline transitions while started
 }
 ```
 
-Values are `null` before `start()`, outside browsers, and where the browser does
-not expose them. `stop()` keeps the values already read.
+`hardwareConcurrency` is read once on `start()`. `online` follows the browser's
+`online` and `offline` events; `true` means only that a network is reachable, not
+that the internet or your servers are. `offlineCount` counts transitions to
+offline while the collector is started, so a page that starts offline reports
+`0`. Values are `null` before `start()`, outside browsers, and where the browser
+does not expose them. `stop()` stops listening and keeps the values already read.
 
 ---
 
@@ -674,6 +681,7 @@ monitor.subscribe((snap) => {
   console.log('  Errors:', snap.errors.totalErrors)
   console.log('  Assets:', snap.resources.totals.count)
   console.log('  CPU cores:', snap.device.hardwareConcurrency)
+  console.log('  Online:', snap.device.online)
 })
 
 // Or read synchronously
@@ -862,7 +870,7 @@ Without `transform`, the reporter sends a bounded, privacy-safe allowlist: the
 snapshot timestamp; current FPS, memory percentage, long-task and CLS aggregates;
 the five-second network aggregate; React commit counts; the retained custom-event
 count; retained error counters; Web Vital values, deltas, and ratings; and the
-logical processor count. It
+logical processor count, online status, and offline transition count. It
 does not send request URLs, error messages or stacks, histories, event labels or
 data, component names, Web Vital IDs, or navigation types. The reporter endpoint
 is also excluded from NetworkCollector, while any configured network filter

@@ -40,8 +40,9 @@ Items are grouped by area and ordered by priority within each group.
 - [ ] **Network Information API** (`navigator.connection`): `effectiveType`,
   `downlink`, `rtt`, `saveData`, and the `change` event. Chromium only. Natural
   context for `NetworkCollector`.
-- [ ] **Online status** (`navigator.onLine` plus the `online` and `offline`
-  events): supported by all engines.
+- [x] **Online status** (`navigator.onLine` plus the `online` and `offline`
+  events): exposed by `DeviceCollector` as `online` and `offlineCount`, and sent
+  by the default reporter.
 - [ ] **Latency across a frozen page**: `NetworkCollector` measures fetch and XHR
   `latency` with `performance.now()`, which keeps advancing while the page is
   frozen or in the back/forward cache. A request that starts before `freeze` and
@@ -82,8 +83,8 @@ those metrics do not expose.
 
 1. Memory: add `measureUserAgentSpecificMemory()` with a fallback to
    `performance.memory`, and add `deviceMemory` as context.
-2. Extend `DeviceCollector` (which already reports `hardwareConcurrency`) with
-   `deviceMemory`, `navigator.connection`, online status, and
+2. Extend `DeviceCollector` (which already reports `hardwareConcurrency` and online status) with
+   `deviceMemory`, `navigator.connection`, and
    `storage.estimate()`. These APIs are cheap and add context to every other
    metric.
 3. `navigation` timing and the Reporting API.

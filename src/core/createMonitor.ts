@@ -144,6 +144,8 @@ function createDefaultReportPayload(snap: MonitorSnapshot, includeResources: boo
     },
     device: {
       hardwareConcurrency: snap.device.hardwareConcurrency,
+      online: snap.device.online,
+      offlineCount: snap.device.offlineCount,
     },
   };
 }
