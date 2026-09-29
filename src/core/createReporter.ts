@@ -6,6 +6,7 @@ import type {
   ReporterSnapshot,
   ReportFailure,
 } from './types';
+import { fitsInUtf8Bytes } from './utf8';
 
 const MAX_TIMER_DELAY = 2_147_483_647;
 const MAX_DEFAULT_TIMEOUT = 30_000;
@@ -208,7 +209,7 @@ export function createReporter(
 
       stage = 'payload-too-large';
 
-      if (new TextEncoder().encode(body).byteLength > (config.maxPayloadBytes ?? 65_536)) {
+      if (!fitsInUtf8Bytes(body, config.maxPayloadBytes ?? 65_536)) {
         throw new DeliveryError(stage);
       }
 

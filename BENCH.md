@@ -34,8 +34,8 @@ Median of three runs.
 | `fetch baseline (unpatched)` | 38,227,735 ops/s | 26.16 ns | ±6% |
 | `fetch through the network collector` | 12,586 ops/s | 79.45 us | ±9% |
 | `errors.capture` | 1,972,534 ops/s | 507 ns | ±1–21% |
-| `reporter flush (default payload)` | 703,745 ops/s | 1.42 us | ±1% |
-| `reporter flush (32 KB transform)` | 24,564 ops/s | 40.71 us | ±0.4% |
+| `reporter flush (default payload)` | 805,604 ops/s | 1.24 us | ±0.4% |
+| `reporter flush (32 KB transform)` | 24,393 ops/s | 41.00 us | ±0.3–4.5% |
 | `React commit with 50 fibers` | 89,119 ops/s | 11.22 us | ±4–7% |
 | `React commit with 1,000 deep fibers` | 13,309 ops/s | 75.14 us | ±2–3% |
 | `React commit with 1,000 wide fibers` | 13,095 ops/s | 76.36 us | ±1–8% |
@@ -78,8 +78,13 @@ without deduplication.
 `reporter flush` measures one complete delivery through a no-op transport:
 building the payload, serializing it, checking its UTF-8 size against
 `maxPayloadBytes`, and running the delivery state machine. The default payload
-is about 1.5 KB. The 32 KB case uses a `transform` with multi-byte text, and
-serializing plus encoding that body dominates its time.
+is about 1.5 KB. The size check decides from the string length when it can: a
+body of at most a third of `maxPayloadBytes` in UTF-16 units always fits, and one
+longer than `maxPayloadBytes` never does. Only bodies in between are encoded,
+with the native `TextEncoder`. Skipping that encoding made the default-payload
+case about 14% faster. The 32 KB case falls in the ambiguous range, so it is
+still encoded, and serializing plus encoding its multi-byte body dominates its
+time.
 
 The React cases cover a normal 50-fiber commit plus deep and wide 1,000-fiber
 trees. The collector walks each tree, creates render entries, trims retained
@@ -106,10 +111,11 @@ memory bounded. That is the right default for correctness and safety, but the
 maintain aggregate maps incrementally, subtracting entries that fall out of
 `maxHistory`.
 
-**Report size check.** The reporter encodes the whole body with `TextEncoder`
-only to compare its byte length with `maxPayloadBytes`. A check that decides
-from the string length when possible, and counts bytes without allocating
-otherwise, would reduce the cost of the 32 KB case.
+**Report size check.** Bodies in the ambiguous length range are still encoded
+in full only to read their byte length. `TextEncoder.encodeInto` with a reused
+buffer is about twice as fast, but it would keep a buffer of `maxPayloadBytes`
+alive for the page's lifetime. Counting bytes in JavaScript is not an option:
+it measured 5 to 25 times slower than the native encoder.
 
 For event-heavy applications, a direct `monitor.events.emit(...)` path is already
 available and avoids DOM event dispatch. `emitMonitorEvent(...)` should remain

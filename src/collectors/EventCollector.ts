@@ -6,6 +6,7 @@ import type {
   IEventCollector,
   MonitorEvent,
 } from '../core/types';
+import { fitsInUtf8Bytes } from '../core/utf8';
 
 const CUSTOM_EVENT_NAME = 'app:monitor:event';
 const DEFAULT_MAX_LABEL_LENGTH = 256;
@@ -28,7 +29,7 @@ function cloneEventData(
   try {
     const serialized = JSON.stringify(data);
 
-    if (serialized === undefined || getUtf8ByteLength(serialized) > maxBytes) {
+    if (serialized === undefined || !fitsInUtf8Bytes(serialized, maxBytes)) {
       return null;
     }
 
@@ -67,22 +68,6 @@ function isWithinDataDepth(root: object, maxDepth: number): boolean {
   }
 
   return true;
-}
-
-function getUtf8ByteLength(value: string): number {
-  let bytes = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    const codePoint = value.codePointAt(index) ?? 0;
-
-    if (codePoint > 0xffff) {
-      index += 1;
-    }
-
-    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-  }
-
-  return bytes;
 }
 
 function normalizeLimit(value: number | undefined, fallback: number): number {
