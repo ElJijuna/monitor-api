@@ -223,7 +223,7 @@ export class ReactCollector implements IReactCollector {
     byComponent: Record<string, ComponentStats>;
     slowComponents: RenderEntry[];
   } | null = null;
-  #slowThreshold: number;
+  #slowThreshold: SSignal<number>;
   #maxFiberVisits: number;
   #commitCounter = 0;
   #pendingUnmounts = new Map<number, PendingUnmount[]>();
@@ -231,18 +231,18 @@ export class ReactCollector implements IReactCollector {
 
   constructor(private readonly config: ReactCollectorConfig) {
     validateMaxHistory(config.maxHistory);
-    this.#slowThreshold = config.slowThreshold;
+    this.#slowThreshold = new SSignal(config.slowThreshold);
     this.#maxFiberVisits = normalizeMaxFiberVisits(config.maxFiberVisits);
     this.#state = new SSignal<ReactState>({ entries: [], totalCommits: 0, truncatedCommits: 0 });
     this.onCommit = new SSignal<RenderEntry | null>(null);
 
     this.snapshot = computed(
-      [this.#state],
-      ([{ entries, totalCommits, truncatedCommits }]): ReactSnapshot => ({
+      [this.#state, this.#slowThreshold],
+      ([{ entries, totalCommits, truncatedCommits }, slowThreshold]): ReactSnapshot => ({
         totalCommits,
         truncatedCommits,
         entries,
-        ...this.#derive(entries),
+        ...this.#derive(entries, slowThreshold),
       }),
     );
   }
@@ -283,9 +283,7 @@ export class ReactCollector implements IReactCollector {
   }
 
   setSlowThreshold(ms: number): void {
-    this.#slowThreshold = ms;
-    // Recompute the snapshot without copying the retained entries.
-    this.#state.mutate(() => {});
+    this.#slowThreshold.value = ms;
   }
 
   clearLog(): void {
@@ -347,20 +345,20 @@ export class ReactCollector implements IReactCollector {
     );
   }
 
-  #derive(entries: RenderEntry[]) {
+  #derive(entries: RenderEntry[], slowThreshold: number) {
     const cached = this.#derived;
 
-    if (cached?.entries === entries && cached.slowThreshold === this.#slowThreshold) {
+    if (cached?.entries === entries && cached.slowThreshold === slowThreshold) {
       return { byComponent: cached.byComponent, slowComponents: cached.slowComponents };
     }
 
     const derived = {
       entries,
-      slowThreshold: this.#slowThreshold,
+      slowThreshold,
       byComponent:
         cached?.entries === entries ? cached.byComponent : this.#computeByComponent(entries),
       slowComponents: entries.filter(
-        (entry) => entry.type !== 'unmount' && entry.duration >= this.#slowThreshold,
+        (entry) => entry.type !== 'unmount' && entry.duration >= slowThreshold,
       ),
     };
 

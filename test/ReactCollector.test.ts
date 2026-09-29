@@ -844,3 +844,30 @@ test('ReactCollector setSlowThreshold recomputes slow components without copying
     monitor.destroy();
   }
 });
+
+test('ReactCollector setSlowThreshold does not notify when the threshold is unchanged', () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {},
+  });
+
+  function Slow() {}
+
+  const monitor = createMonitor({ collectors: { react: { slowThreshold: 16 } } });
+  const notify = jest.fn();
+
+  try {
+    monitor.start();
+    commit(Slow, 20);
+
+    const before = monitor.react.snapshot.value;
+
+    monitor.react.snapshot.subscribe(notify);
+    monitor.react.setSlowThreshold(16);
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(monitor.react.snapshot.value).toBe(before);
+  } finally {
+    monitor.destroy();
+  }
+});
