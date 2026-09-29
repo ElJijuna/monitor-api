@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/ElJijuna/monitor-api/compare/v1.6.0...v1.7.0) (2026-09-29)
+
+
+### Features
+
+* implement batching for performance updates and add shallowEqual utility for efficient comparisons ([8bec9bc](https://github.com/ElJijuna/monitor-api/commit/8bec9bcaf75fe4da73ce1ee4a31a8a375cada0ad))
+
 # [1.6.0](https://github.com/ElJijuna/monitor-api/compare/v1.5.0...v1.6.0) (2026-09-29)
 
 
