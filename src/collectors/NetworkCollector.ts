@@ -10,6 +10,21 @@ import type {
 
 const NETWORK_WINDOW_MS = 5000;
 
+interface WindowTotals {
+  count: number;
+  latency: number;
+  payload: number;
+  errors: number;
+}
+
+interface WindowBucket extends WindowTotals {
+  time: number;
+}
+
+const emptyTotals = (): WindowTotals => ({ count: 0, latency: 0, payload: 0, errors: 0 });
+// Expired buckets before the head are dropped in one splice once they reach this many.
+const WINDOW_COMPACT_AFTER = 1024;
+
 let _idCounter = 0;
 
 const uid = () => `net-${Date.now()}-${++_idCounter}`;
@@ -312,11 +327,13 @@ export class NetworkCollector implements INetworkCollector {
   #isExcluded: (url: string) => boolean;
   #teardown: (() => void) | null = null;
   #windowExpiry: ReturnType<typeof setTimeout> | null = null;
-  // At most 5,001 millisecond buckets, independent of request volume and history size.
-  #windowBuckets = new Map<
-    number,
-    { count: number; latency: number; payload: number; errors: number }
-  >();
+  // A queue of at most 5,001 millisecond buckets, independent of request volume and history size.
+  // Times ascend, so the oldest live bucket is at `#windowHead` and only the last can match `now`.
+  // An array with a moving head avoids the cost of deleting from the front of a Map.
+  #windowBuckets: WindowBucket[] = [];
+  #windowHead = 0;
+  // Sum of the live buckets, kept in step with additions and expirations.
+  #windowTotals = emptyTotals();
 
   constructor(
     private readonly config: NetworkCollectorConfig,
@@ -373,7 +390,9 @@ export class NetworkCollector implements INetworkCollector {
   }
 
   clearLog(): void {
-    this.#windowBuckets.clear();
+    this.#windowBuckets = [];
+    this.#windowHead = 0;
+    this.#windowTotals = emptyTotals();
     this.#entries.value = [];
     this.#clearWindowExpiry();
   }
@@ -390,18 +409,35 @@ export class NetworkCollector implements INetworkCollector {
     const now = Date.now();
 
     this.#pruneWindow(now);
-    const bucket = this.#windowBuckets.get(now) ?? { count: 0, latency: 0, payload: 0, errors: 0 };
+    // After pruning, the queue is either empty or ends with a live bucket.
+    const newest = this.#windowBuckets[this.#windowBuckets.length - 1];
 
-    bucket.count += 1;
-    bucket.latency += entry.latency;
-    bucket.payload += entry.payloadSize;
-    bucket.errors += Number(entry.error !== null || entry.status >= 400);
-    this.#windowBuckets.set(now, bucket);
+    let bucket: WindowBucket;
+
+    if (newest?.time === now) {
+      bucket = newest;
+    } else {
+      bucket = { time: now, ...emptyTotals() };
+      this.#windowBuckets.push(bucket);
+    }
+
+    const errors = Number(entry.error !== null || entry.status >= 400);
+
+    for (const totals of [bucket, this.#windowTotals]) {
+      totals.count += 1;
+      totals.latency += entry.latency;
+      totals.payload += entry.payloadSize;
+      totals.errors += errors;
+    }
 
     this.#entries.value = (prev: NetworkEntry[]) =>
       appendHistory(prev, [entry], this.config.maxHistory);
     this.onRequest.value = entry;
-    this.#scheduleWindowExpiry();
+
+    // A pending timer already targets the oldest bucket, which a newer request cannot change.
+    if (this.#windowExpiry === null) {
+      this.#scheduleWindowExpiry();
+    }
   }
 
   #clearWindowExpiry(): void {
@@ -421,51 +457,69 @@ export class NetworkCollector implements INetworkCollector {
     const now = Date.now();
 
     this.#pruneWindow(now);
-    const nextExpiration = [...this.#windowBuckets.keys()].reduce<number | null>(
-      (next, timestamp) => {
-        const expiration = timestamp + NETWORK_WINDOW_MS + 1;
+    // After pruning, the oldest bucket expires first and always in the future.
+    const oldest = this.#windowBuckets[this.#windowHead]?.time;
 
-        if (expiration <= now) {
-          return next;
-        }
-
-        return next === null ? expiration : Math.min(next, expiration);
-      },
-      null,
-    );
-
-    if (nextExpiration === null) {
+    if (oldest === undefined) {
       return;
     }
 
-    this.#windowExpiry = setTimeout(() => {
-      this.#windowExpiry = null;
-      this.#windowClock.value = Date.now();
-      this.#scheduleWindowExpiry();
-    }, nextExpiration - now);
+    this.#windowExpiry = setTimeout(
+      () => {
+        this.#windowExpiry = null;
+        this.#windowClock.value = Date.now();
+        this.#scheduleWindowExpiry();
+      },
+      oldest + NETWORK_WINDOW_MS + 1 - now,
+    );
   }
 
+  #subtract(bucket: WindowTotals): void {
+    this.#windowTotals.count -= bucket.count;
+    this.#windowTotals.latency -= bucket.latency;
+    this.#windowTotals.payload -= bucket.payload;
+    this.#windowTotals.errors -= bucket.errors;
+  }
+
+  /** Amortized O(1): expires buckets from the head and compacts the queue now and then. */
   #pruneWindow(now: number): void {
-    for (const timestamp of this.#windowBuckets.keys()) {
-      if (timestamp < now - NETWORK_WINDOW_MS || timestamp > now) {
-        this.#windowBuckets.delete(timestamp);
+    const buckets = this.#windowBuckets;
+
+    // The clock moved backwards: buckets from the future are the newest, at the tail.
+    while (buckets.length > this.#windowHead) {
+      const newest = buckets[buckets.length - 1] as WindowBucket;
+
+      if (newest.time <= now) {
+        break;
       }
+
+      buckets.pop();
+      this.#subtract(newest);
+    }
+
+    while (this.#windowHead < buckets.length) {
+      const oldest = buckets[this.#windowHead] as WindowBucket;
+
+      if (oldest.time >= now - NETWORK_WINDOW_MS) {
+        break;
+      }
+
+      this.#subtract(oldest);
+      this.#windowHead += 1;
+    }
+
+    if (this.#windowHead === buckets.length) {
+      buckets.length = 0;
+      this.#windowHead = 0;
+    } else if (this.#windowHead >= WINDOW_COMPACT_AFTER) {
+      buckets.splice(0, this.#windowHead);
+      this.#windowHead = 0;
     }
   }
 
   #computeWindow5s(): NetworkWindow5s {
     this.#pruneWindow(Date.now());
-    let count = 0;
-    let latency = 0;
-    let payload = 0;
-    let errors = 0;
-
-    for (const bucket of this.#windowBuckets.values()) {
-      count += bucket.count;
-      latency += bucket.latency;
-      payload += bucket.payload;
-      errors += bucket.errors;
-    }
+    const { count, latency, payload, errors } = this.#windowTotals;
 
     return {
       count,

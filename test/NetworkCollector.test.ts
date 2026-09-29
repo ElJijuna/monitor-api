@@ -1152,3 +1152,150 @@ test('NetworkCollector start is a no-op without a window', () => {
     monitor.destroy();
   }
 });
+
+describe('window5s', () => {
+  const start = Date.parse('2026-08-07T12:00:00.000Z');
+
+  function sizedResponse(status: number, size: number) {
+    return new Response(null, { status, headers: { 'content-length': String(size) } });
+  }
+
+  test('expires each request exactly 5 s after it, keeping totals of the rest', async () => {
+    jest.useFakeTimers({ now: start });
+
+    const responses = [sizedResponse(200, 100), sizedResponse(500, 20), sizedResponse(200, 3)];
+    const testWindow = installNetworkBrowser(async () => responses.shift() ?? new Response());
+    const monitor = createMonitor({ collectors: { network: true } });
+    const window5s = () => monitor.network.snapshot.value.window5s;
+
+    try {
+      monitor.start();
+      // Timers and the clock advance together, as in a browser.
+      await testWindow.fetch('/a');
+      jest.advanceTimersByTime(1_000);
+      await testWindow.fetch('/b');
+      jest.advanceTimersByTime(2_000);
+      await testWindow.fetch('/c');
+
+      expect(window5s()).toMatchObject({ count: 3, totalPayload: 123, errorRate: 1 / 3 });
+
+      jest.advanceTimersByTime(2_000);
+      expect(window5s()).toMatchObject({ count: 3 });
+
+      jest.advanceTimersByTime(1);
+      expect(window5s()).toMatchObject({ count: 2, totalPayload: 23, errorRate: 0.5 });
+
+      jest.advanceTimersByTime(1_000);
+      expect(window5s()).toMatchObject({ count: 1, totalPayload: 3, errorRate: 0 });
+
+      jest.advanceTimersByTime(2_000);
+      expect(window5s()).toEqual({ count: 0, avgLatency: 0, totalPayload: 0, errorRate: 0 });
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('keeps a single pending expiry timer while requests keep arriving', async () => {
+    jest.useFakeTimers({ now: start });
+
+    const testWindow = installNetworkBrowser(async () => new Response());
+    const monitor = createMonitor({ collectors: { network: true } });
+
+    try {
+      monitor.start();
+
+      const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout');
+
+      for (let index = 0; index < 10; index += 1) {
+        await testWindow.fetch(`/r${index}`);
+        jest.advanceTimersByTime(100);
+      }
+
+      expect(jest.getTimerCount()).toBe(1);
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      expect(monitor.network.snapshot.value.window5s.count).toBe(10);
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('aggregates requests that finish in the same millisecond', async () => {
+    jest.useFakeTimers({ now: start });
+
+    const testWindow = installNetworkBrowser(async () => sizedResponse(200, 10));
+    const monitor = createMonitor({ collectors: { network: true } });
+
+    try {
+      monitor.start();
+      await testWindow.fetch('/one');
+      await testWindow.fetch('/two');
+      await testWindow.fetch('/three');
+
+      expect(monitor.network.snapshot.value.window5s).toMatchObject({
+        count: 3,
+        totalPayload: 30,
+      });
+
+      jest.advanceTimersByTime(5_001);
+      expect(monitor.network.snapshot.value.window5s.count).toBe(0);
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('compacts a long run of expired buckets while newer ones stay live', async () => {
+    jest.useFakeTimers({ now: start });
+
+    const testWindow = installNetworkBrowser(async () => sizedResponse(200, 1));
+    const monitor = createMonitor({ collectors: { network: true } });
+    const window5s = () => monitor.network.snapshot.value.window5s;
+
+    try {
+      monitor.start();
+
+      // One request per millisecond: 1,100 buckets.
+      for (let index = 0; index < 1_100; index += 1) {
+        await testWindow.fetch(`/r${index}`);
+        jest.advanceTimersByTime(1);
+      }
+
+      expect(window5s()).toMatchObject({ count: 1_100, totalPayload: 1_100 });
+
+      // Expire the first 1,050 buckets, more than the compaction threshold.
+      jest.setSystemTime(start + 6_050);
+      await testWindow.fetch('/after-gap');
+
+      expect(window5s()).toMatchObject({ count: 51, totalPayload: 51 });
+
+      jest.advanceTimersByTime(5_001);
+      expect(window5s()).toMatchObject({ count: 0, totalPayload: 0 });
+    } finally {
+      monitor.destroy();
+    }
+  });
+
+  test('drops requests recorded in the future when the clock moves backwards', async () => {
+    jest.useFakeTimers({ now: start });
+
+    const testWindow = installNetworkBrowser(async () => sizedResponse(200, 7));
+    const monitor = createMonitor({ collectors: { network: true } });
+
+    try {
+      monitor.start();
+      await testWindow.fetch('/before-adjustment');
+      jest.setSystemTime(start - 60_000);
+      await testWindow.fetch('/after-adjustment');
+
+      expect(monitor.network.snapshot.value.window5s).toMatchObject({
+        count: 1,
+        totalPayload: 7,
+      });
+
+      jest.advanceTimersByTime(5_001);
+      expect(monitor.network.snapshot.value.window5s.count).toBe(0);
+    } finally {
+      monitor.destroy();
+    }
+  });
+});

@@ -32,7 +32,7 @@ Median of three runs.
 | `emitMonitorEvent` | 205,182 ops/s | 4.87 us | ±1–28% |
 | `Web Vitals subscribe + destroy` | 123,522 ops/s | 8.10 us | ±14–21% |
 | `fetch baseline (unpatched)` | 38,227,735 ops/s | 26.16 ns | ±6% |
-| `fetch through the network collector` | 12,586 ops/s | 79.45 us | ±9% |
+| `fetch through the network collector` | 1,166,950 ops/s | 857 ns | ±1–4% |
 | `errors.capture` | 1,972,534 ops/s | 507 ns | ±1–21% |
 | `reporter flush (default payload)` | 805,604 ops/s | 1.24 us | ±0.4% |
 | `reporter flush (32 KB transform)` | 24,393 ops/s | 41.00 us | ±0.3–4.5% |
@@ -64,13 +64,12 @@ browser's internal metric calculation, which belongs to the platform and the
 `fetch through the network collector` measures a request made through the
 patched `fetch` against a stub that resolves at once, so nearly all of its time
 is collector overhead. The baseline row is the same stub without the patch. The
-collector aggregates the last 5 seconds in per-millisecond buckets, and each
-request scans all of them. Its cost per request therefore grows with the number
-of distinct milliseconds that saw traffic in the last 5 seconds, up to 5,001
-buckets. The case warms up for 5.5 s so it measures that full-window steady
-state; with 300 ms of warmup the same case varied by more than ±100%. At the
-request rates of a normal page the window holds far fewer buckets, so the real
-overhead is much lower. The benchmark shows the worst case.
+collector aggregates the last 5 seconds in per-millisecond buckets, held in a
+time-ordered queue with running totals: each request adds to the newest bucket
+and expires buckets from the oldest end, so its cost does not depend on how many
+buckets are live. The case warms up for 5.5 s so it measures the steady state,
+where buckets expire on every request. An earlier implementation scanned every
+bucket on each request and measured 79 us per request in this case.
 
 `errors.capture` rotates 20 distinct errors, so it measures the recording path
 without deduplication.
@@ -96,13 +95,6 @@ slower, because each commit copies the retained entries and rebuilds
 `byComponent` from all of them.
 
 ## Potential Improvements
-
-**Network window aggregation.** This is the only case whose cost grows with
-load. The collector could keep running totals for the 5-second window, adding
-each request and subtracting buckets as they expire. It could also rely on the
-buckets being stored in time order, pruning from the oldest and scheduling the
-next expiry from the first bucket instead of scanning them all. That would make
-each request constant time on average.
 
 **Incremental React statistics.** `ReactCollector.byComponent` and
 `EventCollector.byLabel` are derived from retained entries to keep runtime

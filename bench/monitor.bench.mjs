@@ -273,8 +273,8 @@ async function runBenchmarks() {
   );
   const networkMonitor = createMonitor({ collectors: { network: true } });
   networkMonitor.start();
-  // The collector aggregates the last 5 s in per-millisecond buckets, so its cost per request
-  // grows until the window is full. Warming up past 5 s measures the steady state.
+  // The collector aggregates the last 5 s in per-millisecond buckets. Warming up past 5 s measures
+  // the steady state, where every request also expires the oldest buckets.
   results.push(
     await bench(
       'fetch through the network collector',
