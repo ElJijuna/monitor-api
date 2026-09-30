@@ -960,3 +960,37 @@ describe('flushOnHide with the default transport', () => {
     }
   });
 });
+
+test('exhausting every attempt consults shouldRetry and delay between attempts only', async () => {
+  jest.useFakeTimers();
+
+  const transport = jest.fn(async () => {
+    throw new Error('down');
+  });
+  const shouldRetry = jest.fn<(error: unknown, attempt: number) => boolean>(() => true);
+  const delay = jest.fn((attempt: number) => attempt * 100);
+  const monitor = reporting({ transport, retry: { maxAttempts: 3, shouldRetry, delay } });
+
+  try {
+    monitor.start();
+
+    const result = monitor.reporter.flush();
+
+    await jest.advanceTimersByTimeAsync(300);
+    expect(await result).toBe(false);
+    expect(transport).toHaveBeenCalledTimes(3);
+    // Not after the last attempt: there is nothing left to retry.
+    expect(shouldRetry.mock.calls.map(([, attempt]) => attempt)).toEqual([1, 2]);
+    expect(delay.mock.calls.map(([attempt]) => attempt)).toEqual([1, 2]);
+    expect(monitor.reporter.snapshot.value).toMatchObject({
+      status: 'idle',
+      attempts: 3,
+      retries: 2,
+      failed: 1,
+      sent: 0,
+      lastFailure: 'transport',
+    });
+  } finally {
+    monitor.destroy();
+  }
+});

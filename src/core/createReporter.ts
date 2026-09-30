@@ -237,7 +237,9 @@ export function createReporter(
     const maxAttempts = config.retry?.maxAttempts ?? 1;
 
     try {
-      // Every iteration returns or throws; the last attempt rethrows its error.
+      // Every iteration returns, retries, or breaks with the error that ends the delivery.
+      let failure: unknown;
+
       for (let attempt = 1; ; attempt += 1) {
         update({ status: 'sending', attempts: state.value.attempts + 1 });
 
@@ -268,7 +270,8 @@ export function createReporter(
           }
 
           if (attempt >= maxAttempts || config.retry?.shouldRetry?.(error, attempt) === false) {
-            throw error;
+            failure = error;
+            break;
           }
 
           const configured = config.retry?.delay ?? 0;
@@ -279,6 +282,8 @@ export function createReporter(
           await waitForRetry(delay, signal);
         }
       }
+
+      throw failure;
     } catch (error) {
       if (!signal.aborted) {
         complete();

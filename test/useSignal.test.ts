@@ -5,6 +5,7 @@ import SSignal from 'ssignal';
 import { createMonitor } from '../src/index';
 import {
   shallowEqual,
+  useDevice,
   useErrors,
   useEvents,
   useMonitor,
@@ -230,6 +231,7 @@ test('each collector hook reads its own collector snapshot', async () => {
 
   function View() {
     seen({
+      device: useDevice(monitor),
       errors: useErrors(monitor),
       events: useEvents(monitor),
       performance: usePerformance(monitor),
@@ -245,6 +247,7 @@ test('each collector hook reads its own collector snapshot', async () => {
 
   try {
     expect(seen).toHaveBeenLastCalledWith({
+      device: monitor.device.snapshot.value,
       errors: monitor.errors.snapshot.value,
       events: monitor.events.snapshot.value,
       performance: monitor.performance.snapshot.value,
@@ -255,5 +258,69 @@ test('each collector hook reads its own collector snapshot', async () => {
   } finally {
     await act(async () => renderer.unmount());
     monitor.destroy();
+  }
+});
+
+test('useDevice with a browser selector ignores viewport changes', async () => {
+  jest.useFakeTimers();
+
+  const realTimers = { setTimeout, clearTimeout, setInterval, clearInterval };
+  const window = Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 720 });
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: window });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0' },
+  });
+
+  const monitor = createMonitor({ collectors: ['device'] });
+  const browserRenders = jest.fn();
+  const viewportRenders = jest.fn();
+
+  function Browser() {
+    browserRenders(useDevice(monitor, (snap) => snap.browser));
+
+    return null;
+  }
+
+  function Viewport() {
+    viewportRenders(useDevice(monitor, (snap) => snap.viewport.width));
+
+    return null;
+  }
+
+  monitor.start();
+
+  const renderer = await mount(
+    createElement('div', null, createElement(Browser), createElement(Viewport)),
+  );
+
+  try {
+    expect(browserRenders).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: 'Firefox', majorVersion: 131 }),
+    );
+    expect(viewportRenders).toHaveBeenLastCalledWith(1280);
+
+    await act(async () => {
+      window.innerWidth = 640;
+      window.dispatchEvent(new Event('resize'));
+      jest.advanceTimersByTime(250);
+    });
+
+    // The browser object keeps its reference, so only the viewport consumer re-renders.
+    expect(viewportRenders).toHaveBeenCalledTimes(2);
+    expect(viewportRenders).toHaveBeenLastCalledWith(640);
+    expect(browserRenders).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => renderer.unmount());
+    monitor.destroy();
+    jest.useRealTimers();
+    Object.assign(globalThis, realTimers);
+    Reflect.deleteProperty(globalThis, 'window');
+
+    if (originalNavigator) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigator);
+    }
   }
 });
