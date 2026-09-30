@@ -61,9 +61,9 @@ export interface DeviceSnapshot {
   language: string | null;
   /** IANA time zone of the browser, such as `Europe/Madrid`. */
   timeZone: string | null;
-  /** Screen size and device pixel ratio, updated on resize. */
+  /** Screen size and device pixel ratio, read again once a resize settles. */
   screen: ScreenInfo;
-  /** Viewport size, updated on resize. */
+  /** Viewport size, read again once a resize settles. */
   viewport: ViewportInfo;
   /** Network quality estimates, updated when the connection changes. */
   connection: ConnectionInfo;

@@ -3,6 +3,13 @@ import { emptyDeviceSnapshot, parseUserAgent } from '../src/collectors/DeviceCol
 import { createMonitor } from '../src/index';
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+// jest.useRealTimers() can leave the interval globals undefined; restore them explicitly.
+const realTimers = {
+  clearInterval: globalThis.clearInterval,
+  clearTimeout: globalThis.clearTimeout,
+  setInterval: globalThis.setInterval,
+  setTimeout: globalThis.setTimeout,
+};
 
 function installBrowser(hardwareConcurrency: unknown, onLine: unknown = true) {
   const window = new EventTarget();
@@ -89,9 +96,9 @@ function installRichBrowser() {
 }
 
 afterEach(() => {
+  jest.useRealTimers();
+  Object.assign(globalThis, realTimers);
   Reflect.deleteProperty(globalThis, 'window');
-  Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
-  Reflect.deleteProperty(globalThis, 'cancelAnimationFrame');
 
   if (originalNavigator) {
     Object.defineProperty(globalThis, 'navigator', originalNavigator);
@@ -372,15 +379,10 @@ test('DeviceCollector reports a null time zone when Intl throws', () => {
   }
 });
 
-test('DeviceCollector reads sizes once per frame while resizing', () => {
+test('DeviceCollector reads sizes once a resize settles', () => {
+  jest.useFakeTimers();
+
   const browser = installRichBrowser();
-  const frames: FrameRequestCallback[] = [];
-
-  Object.assign(globalThis, {
-    requestAnimationFrame: (callback: FrameRequestCallback) => frames.push(callback),
-    cancelAnimationFrame: jest.fn(),
-  });
-
   const monitor = createMonitor({ collectors: ['device'] });
   const notify = jest.fn();
 
@@ -390,33 +392,27 @@ test('DeviceCollector reads sizes once per frame while resizing', () => {
 
   const { screen } = monitor.device.snapshot.value;
 
-  Object.assign(browser.window, { innerWidth: 800, innerHeight: 600 });
-  browser.window.dispatchEvent(new Event('resize'));
-  browser.window.dispatchEvent(new Event('resize'));
-  expect(frames).toHaveLength(1);
+  // A drag fires one resize per frame; none of them updates the snapshot on its own.
+  for (let width = 1200; width >= 800; width -= 100) {
+    Object.assign(browser.window, { innerWidth: width, innerHeight: 600 });
+    browser.window.dispatchEvent(new Event('resize'));
+    jest.advanceTimersByTime(16);
+  }
 
-  frames[0]?.(0);
+  expect(notify).not.toHaveBeenCalled();
+
+  jest.advanceTimersByTime(250);
   expect(monitor.device.snapshot.value.viewport).toEqual({ width: 800, height: 600 });
   // An unchanged nested object keeps its reference.
   expect(monitor.device.snapshot.value.screen).toBe(screen);
   expect(notify).toHaveBeenCalledTimes(1);
 
-  // A frame still pending when the collector stops is cancelled.
-  browser.window.dispatchEvent(new Event('resize'));
-  monitor.stop();
-  expect(globalThis.cancelAnimationFrame).toHaveBeenCalledWith(2);
-
-  monitor.destroy();
-});
-
-test('DeviceCollector reads sizes immediately without requestAnimationFrame', () => {
-  const browser = installRichBrowser();
-  const monitor = createMonitor({ collectors: ['device'] });
-
-  monitor.start();
+  // A read still pending when the collector stops is dropped.
   Object.assign(browser.window, { devicePixelRatio: 1.5 });
   browser.window.dispatchEvent(new Event('resize'));
-  expect(monitor.device.snapshot.value.screen.pixelRatio).toBe(1.5);
+  monitor.stop();
+  jest.advanceTimersByTime(250);
+  expect(monitor.device.snapshot.value.screen.pixelRatio).toBe(2);
 
   monitor.destroy();
 });

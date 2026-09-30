@@ -794,7 +794,8 @@ interface DeviceSnapshot {
 available and otherwise from the User-Agent string. Only the parsed fields are
 kept; the User-Agent string itself is never stored. `hardwareConcurrency`,
 `deviceMemory`, `browser`, `language`, and `timeZone` are read once on `start()`.
-`screen` and `viewport` follow `resize` events (at most once per animation frame),
+`screen` and `viewport` are read 250 ms after the last `resize` event, so a window
+drag updates the snapshot once rather than on every frame;
 `connection` follows the Network Information `change` event, and `colorScheme` and
 `reducedMotion` follow their media queries. `online` follows the browser's
 `online` and `offline` events; `true` means only that a network is reachable, not

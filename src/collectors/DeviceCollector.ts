@@ -47,6 +47,9 @@ interface ExtendedNavigator {
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 const LIGHT_QUERY = '(prefers-color-scheme: light)';
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+// Sizes are read once a resize settles: per-frame updates would rebuild the monitor snapshot
+// and wake every subscriber at 60 Hz while the user drags the window.
+const RESIZE_SETTLE_MS = 250;
 // Order matters: Chromium-based browsers also send `Chrome/`, and Chrome also sends `Safari/`.
 const UA_BROWSERS: [name: string, pattern: RegExp][] = [
   ['Edge', /Edg(?:e|A|iOS)?\/(\d+)/],
@@ -203,7 +206,7 @@ function mediaQuery(query: string): MediaQueryList | null {
 export class DeviceCollector implements IDeviceCollector {
   #destroyed = false;
   #listening = false;
-  #resizeFrame: number | null = null;
+  #resizeTimer: ReturnType<typeof setTimeout> | null = null;
   #connection: NetworkInformation | null = null;
   #queries: MediaQueryList[] = [];
   readonly snapshot = new SSignal<DeviceSnapshot>(emptyDeviceSnapshot());
@@ -273,9 +276,9 @@ export class DeviceCollector implements IDeviceCollector {
 
     this.#queries = [];
 
-    if (this.#resizeFrame !== null) {
-      cancelAnimationFrame(this.#resizeFrame);
-      this.#resizeFrame = null;
+    if (this.#resizeTimer !== null) {
+      clearTimeout(this.#resizeTimer);
+      this.#resizeTimer = null;
     }
 
     this.#listening = false;
@@ -315,24 +318,15 @@ export class DeviceCollector implements IDeviceCollector {
   };
 
   #onResize = (): void => {
-    // Resizing fires many events per frame; read the sizes once per frame.
-    if (typeof requestAnimationFrame !== 'function') {
-      this.#readSizes();
-
-      return;
+    if (this.#resizeTimer !== null) {
+      clearTimeout(this.#resizeTimer);
     }
 
-    if (this.#resizeFrame === null) {
-      this.#resizeFrame = requestAnimationFrame(() => {
-        this.#resizeFrame = null;
-        this.#readSizes();
-      });
-    }
+    this.#resizeTimer = setTimeout(() => {
+      this.#resizeTimer = null;
+      this.#update({ screen: readScreen(), viewport: readViewport() });
+    }, RESIZE_SETTLE_MS);
   };
-
-  #readSizes(): void {
-    this.#update({ screen: readScreen(), viewport: readViewport() });
-  }
 
   #onConnectionChange = (): void => {
     this.#update({ connection: readConnection(this.#connection ?? undefined) });
