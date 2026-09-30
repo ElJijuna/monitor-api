@@ -453,11 +453,8 @@ export class PerformanceCollector implements IPerformanceCollector {
       return;
     }
 
+    // Created only while started, and stop() clears it through #pauseMemory().
     const update = () => {
-      if (!this.#started) {
-        return;
-      }
-
       const mem = this.#readMemory();
 
       batch(() => {

@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import type { ProductionReportRequest } from '../src/index';
 import { createMonitor } from '../src/index';
 
 const originalMemoryDescriptor = Object.getOwnPropertyDescriptor(globalThis.performance, 'memory');
@@ -1166,4 +1167,191 @@ describe('memory measurement', () => {
       browser.restore();
     }
   });
+
+  test('ignores a malformed breakdown and files entries without types under Other', async () => {
+    const browser = installPerformanceBrowser();
+    const measure = installMeasure(async () => ({ bytes: 4 * MB, breakdown: [] }));
+
+    try {
+      const monitor = createMonitor({ collectors: { performance: true } });
+
+      measure.mockResolvedValueOnce({ bytes: 4 * MB, breakdown: 'none' } as never);
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(monitor.performance.memoryMeasurement.value).toMatchObject({
+        total: 4,
+        byType: {},
+        byContext: [],
+      });
+      monitor.destroy();
+
+      const typed = createMonitor({ collectors: { performance: true } });
+
+      measure.mockResolvedValueOnce({
+        bytes: 3 * MB,
+        breakdown: [
+          { bytes: MB, types: null },
+          { bytes: 2 * MB, types: [42, 'DOM'] },
+        ],
+      } as never);
+      typed.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(typed.performance.memoryMeasurement.value?.byType).toEqual({ Other: 1, DOM: 2 });
+
+      typed.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('the default report sends the measured total but no breakdown', async () => {
+    const browser = installPerformanceBrowser();
+    const transport = jest.fn<(request: ProductionReportRequest) => void>();
+
+    installMeasure(async () => measurement(16 * MB));
+
+    try {
+      const monitor = createMonitor({
+        env: 'production',
+        collectors: { performance: true },
+        report: { endpoint: '/metrics', interval: 60_000, transport, flushOnHide: false },
+      });
+
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      const sent = monitor.reporter.flush();
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(await sent).toBe(true);
+
+      const payload = transport.mock.calls[0]?.[0].payload as
+        | { performance: Record<string, unknown> }
+        | undefined;
+
+      expect(payload?.performance.measuredMemory).toBe(16);
+      expect(JSON.stringify(payload)).not.toContain('byType');
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects a memoryMeasurementInterval of %p',
+    (memoryMeasurementInterval) => {
+      expect(() =>
+        createMonitor({ collectors: { performance: { memoryMeasurementInterval } } }),
+      ).toThrow(RangeError);
+    },
+  );
+
+  test('caps the randomized delay at ten times the mean', async () => {
+    const browser = installPerformanceBrowser();
+    const measure = installMeasure(async () => measurement(MB));
+
+    // -ln(1 - 0.999999) is about 13.8 means, above the cap.
+    jest.spyOn(Math, 'random').mockReturnValue(0.999_999);
+
+    try {
+      const monitor = createMonitor({
+        collectors: { performance: { memoryMeasurementInterval: 10_000 } },
+      });
+
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(99_999);
+      expect(measure).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(measure).toHaveBeenCalledTimes(2);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  test('never schedules beyond the largest timer delay, which would fire at once', async () => {
+    const browser = installPerformanceBrowser();
+    const measure = installMeasure(async () => measurement(MB));
+    const maxTimeout = 2_147_483_647;
+
+    jest.spyOn(Math, 'random').mockReturnValue(0.5);
+
+    try {
+      const monitor = createMonitor({
+        collectors: { performance: { memoryMeasurementInterval: 1e12 } },
+      });
+      const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout');
+
+      monitor.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(measure).toHaveBeenCalledTimes(1);
+
+      // The next measurement waits the maximum delay rather than overflowing to 1 ms.
+      // (Advancing the clock that far would run the two-second memory interval a billion times.)
+      expect(setTimeoutSpy.mock.calls[setTimeoutSpy.mock.calls.length - 1]?.[1]).toBe(maxTimeout);
+      await jest.advanceTimersByTimeAsync(3_600_000);
+      expect(measure).toHaveBeenCalledTimes(1);
+
+      monitor.destroy();
+    } finally {
+      browser.restore();
+    }
+  });
+});
+
+test('PerformanceCollector destroy is idempotent', () => {
+  const browser = installPerformanceBrowser();
+
+  try {
+    const monitor = createMonitor({ collectors: { performance: true } });
+
+    monitor.start();
+    monitor.performance.destroy();
+
+    const disconnects = browser.disconnect.mock.calls.length;
+
+    monitor.performance.destroy();
+    expect(browser.disconnect).toHaveBeenCalledTimes(disconnects);
+
+    monitor.destroy();
+  } finally {
+    browser.restore();
+  }
+});
+
+test('PerformanceCollector starts a new CLS session at exactly one second apart or five seconds long', () => {
+  const browser = installPerformanceBrowser();
+  const shift = (startTime: number, value: number) => ({ startTime, value, hadRecentInput: false });
+
+  try {
+    const gap = createMonitor({ collectors: { performance: true } });
+
+    gap.start();
+    // 999 ms apart: one session of 0.2. Then exactly 1,000 ms apart: a new session of 0.15.
+    browser.emit('layout-shift', [shift(0, 0.1), shift(999, 0.1), shift(1_999, 0.15)]);
+    expect(gap.performance.cls.value).toBeCloseTo(0.2);
+    gap.destroy();
+
+    const long = createMonitor({ collectors: { performance: true } });
+
+    long.start();
+    // Shifts 900 ms apart; the one at 5,000 ms is not within the first session's five seconds.
+    browser.emit(
+      'layout-shift',
+      [0, 900, 1_800, 2_700, 3_600, 4_500].map((startTime) => shift(startTime, 0.01)),
+    );
+    expect(long.performance.cls.value).toBeCloseTo(0.06);
+    browser.emit('layout-shift', [shift(5_000, 0.05)]);
+    expect(long.performance.cls.value).toBeCloseTo(0.06);
+    browser.emit('layout-shift', [shift(5_000, 0.02)]);
+    expect(long.performance.cls.value).toBeCloseTo(0.07);
+    long.destroy();
+  } finally {
+    browser.restore();
+  }
 });
