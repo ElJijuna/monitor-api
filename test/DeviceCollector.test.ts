@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { emptyDeviceSnapshot, parseUserAgent } from '../src/collectors/DeviceCollector';
+import type { ProductionReportRequest } from '../src/index';
 import { createMonitor } from '../src/index';
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -330,6 +331,32 @@ test.each([
     'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     { name: 'Chrome', majorVersion: 128, mobile: false, platform: 'Chrome OS' },
   ],
+  [
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36',
+    { name: 'Chrome', majorVersion: 128, mobile: true, platform: 'Android' },
+  ],
+  [
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 EdgA/128.0.2739.73',
+    { name: 'Edge', majorVersion: 128, mobile: true, platform: 'Android' },
+  ],
+  [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/128.2739.60 Version/17.0 Mobile/15E148 Safari/604.1',
+    { name: 'Edge', majorVersion: 128, mobile: true, platform: 'iOS' },
+  ],
+  [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/130.0 Mobile/15E148 Safari/605.1.15',
+    { name: 'Firefox', majorVersion: 130, mobile: true, platform: 'iOS' },
+  ],
+  [
+    // Tablets do not say "Mobile".
+    'Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/604.1',
+    { name: 'Safari', majorVersion: 17, mobile: false, platform: 'iOS' },
+  ],
+  [
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/128.0.0.0 Safari/537.36',
+    { name: 'Chrome', majorVersion: 128, mobile: false, platform: 'Linux' },
+  ],
+  ['', { name: null, majorVersion: null, mobile: false, platform: null }],
   ['curl/8.4.0', { name: null, majorVersion: null, mobile: false, platform: null }],
 ])('parseUserAgent reads %s', (userAgent, expected) => {
   expect(parseUserAgent(userAgent)).toEqual(expected);
@@ -482,4 +509,188 @@ test('DeviceCollector skips listeners the browser does not support', () => {
   throwing.start();
   expect(throwing.device.snapshot.value).toMatchObject({ colorScheme: null, reducedMotion: null });
   throwing.destroy();
+});
+
+test('DeviceCollector reports empty values in a browser without navigator', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: undefined });
+
+  const monitor = createMonitor({ collectors: ['device'] });
+
+  monitor.start();
+  expect(monitor.device.snapshot.value).toMatchObject({
+    hardwareConcurrency: null,
+    online: null,
+    browser: { name: null, majorVersion: null, mobile: null, platform: null },
+    language: null,
+  });
+
+  monitor.destroy();
+});
+
+test('DeviceCollector tolerates malformed Client Hints', () => {
+  const browser = installRichBrowser();
+
+  Object.assign(browser.navigator, {
+    userAgentData: {
+      brands: [{ brand: 'Google Chrome', version: 'beta' }],
+      mobile: 'no',
+      platform: '',
+    },
+  });
+
+  const monitor = createMonitor({ collectors: ['device'] });
+
+  monitor.start();
+  expect(monitor.device.snapshot.value.browser).toEqual({
+    name: 'Chrome',
+    majorVersion: null,
+    mobile: null,
+    platform: null,
+  });
+  monitor.destroy();
+
+  // Without a brands list, the User-Agent string is used instead.
+  Object.assign(browser.navigator, { userAgentData: { mobile: false, platform: 'macOS' } });
+
+  const fallback = createMonitor({ collectors: ['device'] });
+
+  fallback.start();
+  expect(fallback.device.snapshot.value.browser).toMatchObject({
+    name: 'Chrome',
+    majorVersion: 128,
+  });
+  fallback.destroy();
+});
+
+test('DeviceCollector reads values once where window cannot listen for events', () => {
+  installBrowser(4);
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { innerWidth: 390 } });
+
+  const monitor = createMonitor({ collectors: ['device'] });
+
+  monitor.start();
+  expect(monitor.device.snapshot.value).toMatchObject({
+    hardwareConcurrency: 4,
+    viewport: { width: 390, height: null },
+  });
+
+  // Nothing was registered, so stop() has nothing to remove.
+  expect(() => monitor.stop()).not.toThrow();
+  monitor.destroy();
+});
+
+test.each([
+  [
+    [
+      { brand: 'Microsoft Edge', version: '129' },
+      { brand: 'Chromium', version: '129' },
+    ],
+    'Edge',
+    129,
+  ],
+  [
+    [
+      { brand: 'Chromium', version: '128' },
+      { brand: 'Opera', version: '114' },
+    ],
+    'Opera',
+    114,
+  ],
+  [
+    [
+      { brand: 'Not/A)Brand', version: '8' },
+      { brand: 'Chromium', version: '126' },
+    ],
+    'Chromium',
+    126,
+  ],
+])('DeviceCollector names the vendor brand from Client Hints %j', (brands, name, majorVersion) => {
+  const browser = installRichBrowser();
+
+  browser.navigator.userAgentData.brands = brands;
+
+  const monitor = createMonitor({ collectors: ['device'] });
+
+  monitor.start();
+  expect(monitor.device.snapshot.value.browser).toMatchObject({ name, majorVersion });
+
+  monitor.destroy();
+});
+
+test('DeviceCollector registers its listeners once when started twice', () => {
+  const browser = installRichBrowser();
+  const monitor = createMonitor({ collectors: ['device'] });
+  const notify = jest.fn();
+
+  monitor.start();
+  monitor.device.start();
+  monitor.device.snapshot.subscribe(notify);
+  notify.mockClear();
+
+  browser.connection.rtt = 150;
+  browser.connection.dispatchEvent(new Event('change'));
+  browser.setMedia('(prefers-reduced-motion: reduce)', true);
+
+  expect(notify).toHaveBeenCalledTimes(2);
+
+  // One stop() removes everything; later changes are ignored.
+  monitor.stop();
+  browser.connection.rtt = 300;
+  browser.connection.dispatchEvent(new Event('change'));
+  expect(monitor.device.snapshot.value.connection.rtt).toBe(150);
+
+  monitor.destroy();
+});
+
+test('DeviceCollector re-reads everything on a restart after stop', () => {
+  const browser = installRichBrowser();
+  const monitor = createMonitor({ collectors: ['device'] });
+
+  monitor.start();
+  monitor.stop();
+
+  // Changes made while stopped are picked up by the next start().
+  browser.navigator.language = 'en-GB';
+  browser.connection.effectiveType = '3g';
+  Object.assign(browser.window, { innerWidth: 390 });
+  monitor.start();
+
+  expect(monitor.device.snapshot.value).toMatchObject({
+    language: 'en-GB',
+    connection: { effectiveType: '3g' },
+    viewport: { width: 390 },
+  });
+
+  monitor.destroy();
+});
+
+test('report.transform receives the full device snapshot', async () => {
+  installRichBrowser();
+
+  const transport = jest.fn<(request: ProductionReportRequest) => void>();
+  const monitor = createMonitor({
+    env: 'production',
+    collectors: ['device'],
+    report: {
+      endpoint: '/metrics',
+      interval: 60_000,
+      transport,
+      flushOnHide: false,
+      transform: (snapshot) => ({
+        language: snapshot.device.language,
+        platform: snapshot.device.browser.platform,
+      }),
+    },
+  });
+
+  try {
+    monitor.start();
+    expect(await monitor.reporter.flush()).toBe(true);
+    expect(transport).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { language: 'es-ES', platform: 'macOS' } }),
+    );
+  } finally {
+    monitor.destroy();
+  }
 });

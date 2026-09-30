@@ -182,7 +182,7 @@ function readViewport(): ViewportInfo {
   };
 }
 
-function readConnection(connection: NetworkInformation | undefined): ConnectionInfo {
+function readConnection(connection: NetworkInformation | null | undefined): ConnectionInfo {
   return {
     effectiveType: nonEmptyString(connection?.effectiveType),
     rtt: nonNegativeNumber(connection?.rtt),
@@ -329,7 +329,7 @@ export class DeviceCollector implements IDeviceCollector {
   };
 
   #onConnectionChange = (): void => {
-    this.#update({ connection: readConnection(this.#connection ?? undefined) });
+    this.#update({ connection: readConnection(this.#connection) });
   };
 
   #onPreferenceChange = (): void => {
