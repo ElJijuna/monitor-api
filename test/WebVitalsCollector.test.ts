@@ -720,3 +720,64 @@ describe('soft navigations', () => {
     }
   });
 });
+
+test('monitors share one attribution load per option set and receive only their channel', async () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  // No other test uses attribution with soft navigations, so both channels are new here.
+  const options = { attribution: true, softNavigations: true };
+  const first = createMonitor({
+    collectors: { webVitals: { ...options, reportAllChanges: false } },
+  });
+  const stopped = createMonitor({
+    collectors: { webVitals: { ...options, reportAllChanges: false } },
+  });
+  const allChanges = createMonitor({
+    collectors: { webVitals: { ...options, reportAllChanges: true } },
+  });
+
+  try {
+    first.start();
+    stopped.start();
+    allChanges.start();
+    // Stopped before the attribution build finished loading.
+    stopped.stop();
+    await loadAttributionBuild();
+
+    // One registration per channel, not per monitor.
+    const registrations = (webVitalsAttribution.onLCP as jest.Mock).mock.calls as [
+      MetricCallback,
+      { reportAllChanges: boolean },
+    ][];
+
+    expect(registrations.map(([, opts]) => opts)).toEqual([
+      { reportAllChanges: false, reportSoftNavs: true },
+      { reportAllChanges: true, reportSoftNavs: true },
+    ]);
+
+    const publishFinal = registrations[0]?.[0];
+    const publishAll = registrations[1]?.[0];
+
+    publishFinal?.(metric('LCP', 1200));
+    expect(first.webVitals.snapshot.value.lcp?.value).toBe(1200);
+    expect(stopped.webVitals.snapshot.value.lcp).toBeNull();
+    expect(allChanges.webVitals.snapshot.value.lcp).toBeNull();
+
+    publishAll?.(metric('LCP', 900));
+    expect(allChanges.webVitals.snapshot.value.lcp?.value).toBe(900);
+    expect(first.webVitals.snapshot.value.lcp?.value).toBe(1200);
+
+    // clearLog keeps the subscription, and a later report of the same navigation replaces the latest.
+    first.webVitals.clearLog();
+    publishFinal?.(metric('LCP', 1300));
+    publishFinal?.(metric('LCP', 1400));
+    expect(first.webVitals.snapshot.value.lcp?.value).toBe(1400);
+    expect(first.webVitals.snapshot.value.entries.map((entry) => entry.value)).toEqual([
+      1300, 1400,
+    ]);
+  } finally {
+    first.destroy();
+    stopped.destroy();
+    allChanges.destroy();
+  }
+});

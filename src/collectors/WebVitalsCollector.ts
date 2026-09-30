@@ -272,11 +272,9 @@ export class WebVitalsCollector implements IWebVitalsCollector {
     this.onMetric.value = null;
   }
 
+  // Only called while subscribed: stop() removes this subscriber from its channel, and a channel
+  // does not visit subscribers removed during a publish.
   #record(metric: ReportedMetric): void {
-    if (!this.#started) {
-      return;
-    }
-
     const nextMetric: WebVitalMetric = {
       name: metric.name as WebVitalName,
       value: metric.value,
