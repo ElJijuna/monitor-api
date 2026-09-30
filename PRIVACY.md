@@ -15,7 +15,7 @@ third-party analytics endpoint.
 | Events | Application labels and serializable custom payloads | Retained event count only |
 | Errors | Message, stack, source location, type, and occurrence count | Error counters only |
 | Resources (opt-in) | Asset URLs, types, durations, sizes, cache state, status, and origin | Totals and per-type aggregates only |
-| Device | Logical processor count (`navigator.hardwareConcurrency`), online status (`navigator.onLine`), and offline transition count | All three values |
+| Device | Logical processor count, approximate device memory, online status and offline transition count; browser name, major version, mobile flag, and operating system parsed from User-Agent Client Hints or the User-Agent string (the string itself is not kept); language; time zone; screen size, pixel ratio, and viewport size; network quality estimates (`navigator.connection`); color-scheme and reduced-motion preferences | Processor count, online status, offline transition count, and browser name, major version, and mobile flag; no platform, language, time zone, sizes, connection, or preferences |
 | Web Vitals | Values, deltas, ratings, IDs, navigation types, navigation IDs, the URL of the page view each metric belongs to (including SPA routes with `softNavigations`), and timestamps; with `attribution`, also CSS selectors of the LCP, INP, and CLS elements, the LCP resource URL, the longest script's URL and invoker, and phase timings | Values, deltas, and ratings; with `attribution`, phase timings, interaction type, load state, and script invoker type, but no selectors, URLs, or invokers |
 
 All histories are held in JavaScript memory and bounded by `maxHistory`. Calling
@@ -28,7 +28,7 @@ across page loads.
 Reporting runs only when `env: 'production'` and `report.endpoint` or a custom
 transport is provided. The built-in payload is an allowlist. It excludes request
 URLs, headers and bodies; resource URLs; event labels and payloads; component names; error
-messages and stacks; Web Vital IDs, navigation types, navigation IDs, and navigation URLs; Web Vitals attribution
+messages and stacks; device platform, language, time zone, screen and viewport sizes, connection estimates, and preferences; Web Vital IDs, navigation types, navigation IDs, and navigation URLs; Web Vitals attribution
 selectors, URLs, and script invokers; long animation frame entries and their script
 URLs, invokers, and function names; memory measurement breakdowns, including frame and worker
 URLs; and all retained histories. The report endpoint is excluded from network instrumentation.

@@ -37,6 +37,7 @@ const monitor = createMonitor({
     errors: true,
     resources: true,
     webVitals: { attribution: true, softNavigations: true },
+    device: true,
   },
   env: 'production',
   maxHistory: 40,

@@ -72,3 +72,28 @@ test('soft navigate updates the URL and view, which survive a reload', async ({ 
   await page.reload();
   await expect(page.locator('#view-title')).toHaveText('Orders');
 });
+
+test('device snapshot identifies the browser engine and reads the environment', async ({
+  page,
+  browserName,
+}) => {
+  await page.goto('/');
+  await expect(page.locator('#status-text')).toHaveText('running');
+
+  const device = await page.evaluate(() => window.monitorDemo.snapshot().device);
+  const expectedName = { chromium: /Chrom/, firefox: /^Firefox$/, webkit: /^Safari$/ }[browserName];
+
+  expect(device.browser.name).toMatch(expectedName);
+  expect(device.browser.majorVersion).toBeGreaterThan(0);
+  expect(device.browser.mobile).toBe(false);
+  expect(device.language).toEqual(expect.any(String));
+  expect(device.timeZone).toEqual(expect.any(String));
+  expect(device.viewport).toEqual(page.viewportSize());
+  expect(device.colorScheme).toMatch(/^(light|dark)$/);
+  expect(typeof device.reducedMotion).toBe('boolean');
+
+  await page.setViewportSize({ width: 640, height: 480 });
+  await expect
+    .poll(() => page.evaluate(() => window.monitorDemo.snapshot().device.viewport))
+    .toEqual({ width: 640, height: 480 });
+});

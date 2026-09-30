@@ -748,15 +748,17 @@ after `stop()`, a new `start()` records only resources that finish after it.
 
 ### DeviceCollector
 
-Reports the capabilities and connectivity of the device running the page, useful
-for segmenting the other metrics by device class and for explaining failed
-requests. It is enabled by default.
+Reports the capabilities, browser, preferences, and connectivity of the device
+running the page, useful for segmenting the other metrics by browser and device
+class and for explaining failed requests. It is enabled by default.
 
 ```ts
 monitor.start()
 
-monitor.device.snapshot.subscribe(({ hardwareConcurrency, online, offlineCount }) => {
+monitor.device.snapshot.subscribe(({ browser, hardwareConcurrency, connection, online, offlineCount }) => {
+  console.log(`${browser.name ?? 'Unknown'} ${browser.majorVersion ?? ''} on ${browser.platform ?? 'n/a'}`)
   console.log('Logical processors:', hardwareConcurrency ?? 'n/a')
+  console.log('Connection:', connection.effectiveType ?? 'n/a')
   console.log(online === false ? 'Offline' : 'Online', `(went offline ${offlineCount} times)`)
 })
 ```
@@ -764,17 +766,47 @@ monitor.device.snapshot.subscribe(({ hardwareConcurrency, online, offlineCount }
 ```ts
 interface DeviceSnapshot {
   hardwareConcurrency: number | null // navigator.hardwareConcurrency
+  deviceMemory: number | null        // navigator.deviceMemory in GB (Chromium only)
   online: boolean | null             // navigator.onLine, updated on online/offline events
   offlineCount: number               // offline transitions while started
+  browser: {
+    name: string | null              // 'Chrome', 'Edge', 'Firefox', 'Safari', 'Opera', 'Samsung Internet'
+    majorVersion: number | null
+    mobile: boolean | null
+    platform: string | null          // 'Windows', 'macOS', 'Linux', 'Android', 'iOS', 'Chrome OS'
+  }
+  language: string | null            // navigator.language, e.g. 'es-ES'
+  timeZone: string | null            // IANA time zone, e.g. 'Europe/Madrid'
+  screen: { width: number | null; height: number | null; pixelRatio: number | null }
+  viewport: { width: number | null; height: number | null }
+  connection: {                      // navigator.connection (Chromium only)
+    effectiveType: string | null     // 'slow-2g' | '2g' | '3g' | '4g'
+    rtt: number | null               // ms
+    downlink: number | null          // Mbps
+    saveData: boolean | null
+  }
+  colorScheme: 'light' | 'dark' | null // prefers-color-scheme
+  reducedMotion: boolean | null      // prefers-reduced-motion
 }
 ```
 
-`hardwareConcurrency` is read once on `start()`. `online` follows the browser's
+`browser` comes from User-Agent Client Hints (`navigator.userAgentData`) where
+available and otherwise from the User-Agent string. Only the parsed fields are
+kept; the User-Agent string itself is never stored. `hardwareConcurrency`,
+`deviceMemory`, `browser`, `language`, and `timeZone` are read once on `start()`.
+`screen` and `viewport` follow `resize` events (at most once per animation frame),
+`connection` follows the Network Information `change` event, and `colorScheme` and
+`reducedMotion` follow their media queries. `online` follows the browser's
 `online` and `offline` events; `true` means only that a network is reachable, not
 that the internet or your servers are. `offlineCount` counts transitions to
 offline while the collector is started, so a page that starts offline reports
 `0`. Values are `null` before `start()`, outside browsers, and where the browser
 does not expose them. `stop()` stops listening and keeps the values already read.
+
+The default reporter sends `hardwareConcurrency`, `online`, `offlineCount`, and the
+browser `name`, `majorVersion`, and `mobile` flag. The platform, language, time
+zone, sizes, connection, and preferences stay in memory: combined, they narrow
+down a user. Use `report.transform` to send any of them.
 
 ---
 
@@ -793,6 +825,7 @@ monitor.subscribe((snap) => {
   console.log('  Errors:', snap.errors.totalErrors)
   console.log('  Assets:', snap.resources.totals.count)
   console.log('  CPU cores:', snap.device.hardwareConcurrency)
+  console.log('  Browser:', snap.device.browser.name, snap.device.browser.majorVersion)
   console.log('  Online:', snap.device.online)
 })
 

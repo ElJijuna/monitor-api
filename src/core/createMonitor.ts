@@ -144,10 +144,17 @@ function createDefaultReportPayload(snap: MonitorSnapshot, includeResources: boo
         requestDuration: a.requestDuration,
       })),
     },
+    // Low-entropy fields only: platform, language, time zone, sizes, connection, and
+    // preferences stay local, because together they narrow down a user.
     device: {
       hardwareConcurrency: snap.device.hardwareConcurrency,
       online: snap.device.online,
       offlineCount: snap.device.offlineCount,
+      browser: {
+        name: snap.device.browser.name,
+        majorVersion: snap.device.browser.majorVersion,
+        mobile: snap.device.browser.mobile,
+      },
     },
   };
 }

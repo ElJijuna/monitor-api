@@ -18,8 +18,8 @@ Items are grouped by area and ordered by priority within each group.
 - [x] **Per-frame and per-worker memory**: `memoryMeasurement.byContext` lists the
   20 frames and workers holding the most memory, with URLs capped at 500
   characters. It stays local; the default reporter sends only the total.
-- [ ] **`navigator.deviceMemory`**: approximate device RAM in GB (0.25–8). Chromium
-  only. Useful for segmenting metrics by device class.
+- [x] **`navigator.deviceMemory`**: approximate device RAM in GB (0.25–8), exposed
+  by `DeviceCollector` as `deviceMemory`. Chromium only. Kept local.
 - [ ] **`navigator.storage.estimate()`**: storage `usage` and `quota` (IndexedDB,
   Cache Storage, and similar). Supported by all modern engines; Chromium also
   returns `usageDetails`.
@@ -32,14 +32,19 @@ Items are grouped by area and ordered by priority within each group.
 - [x] **`navigator.hardwareConcurrency`**: logical CPU core count, exposed by the
   new `DeviceCollector` as `snapshot.device.hardwareConcurrency` and sent by the
   default reporter.
+- [x] **Browser and environment**: browser name, major version, mobile flag, and
+  platform (Client Hints with a User-Agent fallback), language, time zone, screen
+  and viewport sizes, and color-scheme and reduced-motion preferences, exposed by
+  `DeviceCollector`. The default reporter sends only the browser name, major
+  version, and mobile flag.
 - [ ] **Battery Status API** (`navigator.getBattery()`): charge level and charging
   state. Chromium only.
 
 ## Network
 
-- [ ] **Network Information API** (`navigator.connection`): `effectiveType`,
-  `downlink`, `rtt`, `saveData`, and the `change` event. Chromium only. Natural
-  context for `NetworkCollector`.
+- [x] **Network Information API** (`navigator.connection`): `effectiveType`,
+  `downlink`, `rtt`, and `saveData`, updated on the `change` event, exposed by
+  `DeviceCollector` as `connection`. Chromium only. Kept local.
 - [x] **Online status** (`navigator.onLine` plus the `online` and `offline`
   events): exposed by `DeviceCollector` as `online` and `offlineCount`, and sent
   by the default reporter.
@@ -81,10 +86,8 @@ those metrics do not expose.
 
 ## Suggested order
 
-1. Extend `DeviceCollector` (which already reports `hardwareConcurrency` and
-   online status) with `deviceMemory`, `navigator.connection`, and
-   `storage.estimate()`. These APIs are cheap and add context to every other
-   metric.
+1. Extend `DeviceCollector` (which already reports the browser, device memory,
+   and network quality) with `storage.estimate()`.
 2. `navigation` timing and the Reporting API.
 3. Compute Pressure, Battery, and the remaining performance
    entry types.

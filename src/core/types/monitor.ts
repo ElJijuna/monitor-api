@@ -30,7 +30,7 @@ export interface MonitorSnapshot {
   resources: ResourceSnapshot;
   /** Standard Web Vitals metrics collected from the browser. */
   webVitals: WebVitalsSnapshot;
-  /** Static device capabilities such as the logical processor count. */
+  /** Device capabilities, browser details, preferences, and connectivity. */
   device: DeviceSnapshot;
 }
 

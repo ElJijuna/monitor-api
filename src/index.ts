@@ -2,11 +2,13 @@ export { emitMonitorEvent } from './collectors/EventCollector';
 export { createMonitor } from './core/createMonitor';
 
 export type {
+  // Device
+  BrowserInfo,
   // Web Vitals
   CLSAttributionSummary,
   CollectorName,
   ComponentStats,
-  // Device
+  ConnectionInfo,
   DeviceSnapshot,
   ErrorCollectorConfig,
   ErrorSnapshot,
@@ -67,7 +69,9 @@ export type {
   ResourceTotals,
   ResourceType,
   ResourceTypeStats,
+  ScreenInfo,
   TTFBAttributionSummary,
+  ViewportInfo,
   WebVitalAttributionMap,
   WebVitalLoadState,
   WebVitalMetric,

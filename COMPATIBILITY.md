@@ -16,6 +16,10 @@ three browser engines through Playwright on every pull request.
 | Page memory measurement | Feature detected | `null` | `null` | Chromium-only `measureUserAgentSpecificMemory()`, only in cross-origin isolated pages (COOP and COEP headers; see [Enabling page memory measurement](README.md#enabling-page-memory-measurement)) |
 | Logical processor count | Supported | Supported | Supported | `null` where `navigator.hardwareConcurrency` is absent |
 | Online status | Supported | Supported | Supported | `null` where `navigator.onLine` is absent |
+| Browser name, version, platform | Client Hints | User-Agent string | User-Agent string | Unrecognized browsers report `null` name and version |
+| Device memory | Supported | `null` | `null` | Chromium-only `navigator.deviceMemory` |
+| Network quality | Supported | `null` | `null` | Chromium-only `navigator.connection` |
+| Language, time zone, screen, viewport, color scheme, reduced motion | Supported | Supported | Supported | `null` where the API is absent |
 | Long Tasks | Feature detected | Feature detected | Feature detected | Empty aggregate when unsupported |
 | React commit collection | Feature detected | Feature detected | Feature detected | Requires the React DevTools global hook |
 | Server-side import/start | Tested in Node | Tested in Node | Tested in Node | Browser collectors no-op |

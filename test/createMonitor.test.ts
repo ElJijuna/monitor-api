@@ -658,7 +658,16 @@ test('the default report includes device capabilities and connectivity', async (
   Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
-    value: { hardwareConcurrency: 6, onLine: true },
+    value: {
+      hardwareConcurrency: 6,
+      onLine: true,
+      language: 'es-ES',
+      userAgentData: {
+        brands: [{ brand: 'Google Chrome', version: '128' }],
+        mobile: true,
+        platform: 'Android',
+      },
+    },
   });
 
   const monitor = createMonitor({
@@ -671,8 +680,26 @@ test('the default report includes device capabilities and connectivity', async (
     monitor.start();
     expect(await monitor.reporter.flush()).toBe(true);
     expect(transport.mock.calls[0]?.[0].payload).toMatchObject({
-      device: { hardwareConcurrency: 6, online: true, offlineCount: 0 },
+      device: {
+        hardwareConcurrency: 6,
+        online: true,
+        offlineCount: 0,
+        browser: { name: 'Chrome', majorVersion: 128, mobile: true },
+      },
     });
+
+    // Fields that narrow down a user stay local.
+    const payload = transport.mock.calls[0]?.[0].payload as
+      | { device: Record<string, unknown> }
+      | undefined;
+
+    expect(Object.keys(payload?.device ?? {}).sort()).toEqual([
+      'browser',
+      'hardwareConcurrency',
+      'offlineCount',
+      'online',
+    ]);
+    expect(payload?.device.browser).not.toHaveProperty('platform');
   } finally {
     monitor.destroy();
 
