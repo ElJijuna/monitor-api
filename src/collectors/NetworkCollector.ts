@@ -299,14 +299,9 @@ function subscribeToNetwork(listener: NetworkListener): () => void {
     installNetworkPatches();
   }
 
-  let subscribed = true;
-
+  // Safe to call twice: deleting an absent listener is a no-op, and restoring already restored
+  // patches changes nothing.
   return () => {
-    if (!subscribed) {
-      return;
-    }
-
-    subscribed = false;
     networkListeners.delete(listener);
 
     if (networkListeners.size === 0) {
@@ -450,6 +445,7 @@ export class NetworkCollector implements INetworkCollector {
   #scheduleWindowExpiry(): void {
     this.#clearWindowExpiry();
 
+    // A filter or onRequest subscriber may have stopped the collector while a request was recorded.
     if (!this.#teardown) {
       return;
     }

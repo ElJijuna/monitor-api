@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { NetworkCollector } from '../src/collectors/NetworkCollector';
 import { createMonitor } from '../src/index';
 
 class FakeXMLHttpRequest extends EventTarget {
@@ -1298,4 +1299,65 @@ describe('window5s', () => {
       monitor.destroy();
     }
   });
+
+  test.each([
+    ['an onRequest subscriber', 'onRequest'],
+    ['a filter', 'filter'],
+  ])('stopping from %s leaves no expiry timer behind', async (_, trigger) => {
+    jest.useFakeTimers({ now: start });
+
+    const testWindow = installNetworkBrowser(async () => new Response());
+    const monitor = createMonitor({
+      collectors: {
+        network:
+          trigger === 'filter'
+            ? {
+                filter: () => {
+                  monitor.stop();
+
+                  return true;
+                },
+              }
+            : true,
+      },
+    });
+
+    if (trigger === 'onRequest') {
+      monitor.network.onRequest.subscribe((entry) => {
+        if (entry) {
+          monitor.stop();
+        }
+      });
+    }
+
+    try {
+      monitor.start();
+      await testWindow.fetch('/last');
+
+      // The request that triggered the stop is still recorded, but nothing keeps running.
+      expect(monitor.network.snapshot.value.entries.map((entry) => entry.url)).toEqual(['/last']);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      monitor.destroy();
+    }
+  });
+});
+
+test('NetworkCollector created on its own excludes no URL by default', async () => {
+  const fetchMock: typeof fetch = async () => new Response('ok');
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { fetch: jest.fn(fetchMock) },
+  });
+
+  const collector = new NetworkCollector({ maxHistory: 10 });
+
+  collector.start();
+  await (globalThis.window as unknown as { fetch: typeof fetch }).fetch('/metrics');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(collector.snapshot.value.entries.map((entry) => entry.url)).toEqual(['/metrics']);
+
+  collector.destroy();
 });
