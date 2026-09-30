@@ -141,14 +141,9 @@ function subscribeToReactCommits(listener: ReactCommitListener): () => void {
     installReactHook();
   }
 
-  let subscribed = true;
-
+  // Safe to call twice: deleting an absent listener is a no-op, and restoring an already
+  // restored hook changes nothing.
   return () => {
-    if (!subscribed) {
-      return;
-    }
-
-    subscribed = false;
     reactCommitListeners.delete(listener);
 
     if (reactCommitListeners.size === 0) {
@@ -181,8 +176,8 @@ function didSubtreeChange(fiber: Fiber): boolean {
 }
 
 /** `actualDuration` includes descendants; subtract the direct children to get the fiber's own time. */
-function getSelfDuration(fiber: Fiber): number {
-  let duration = fiber.actualDuration ?? 0;
+function getSelfDuration(fiber: Fiber, actualDuration: number): number {
+  let duration = actualDuration;
 
   for (let { child } = fiber; child; child = child.sibling) {
     duration -= child.actualDuration ?? 0;
@@ -518,18 +513,16 @@ export class ReactCollector implements IReactCollector {
     let visited = 0;
 
     while (stack.length > 0 && visited < this.#maxFiberVisits) {
-      const current = stack.pop();
-
-      if (!current) {
-        continue;
-      }
+      // The loop condition guarantees an element, and only fibers are pushed.
+      const current = stack.pop() as Fiber;
 
       visited += 1;
 
       const name = didRender(current) ? this.#getComponentName(current.type) : null;
       // Only development and profiling builds time renders; coarse browser timers may still read 0.
-      const profiled = typeof current.actualDuration === 'number';
-      const duration = name && profiled ? getSelfDuration(current) : 0;
+      const { actualDuration } = current;
+      const profiled = typeof actualDuration === 'number';
+      const duration = name && profiled ? getSelfDuration(current, actualDuration) : 0;
 
       if (name && (profiled || this.config.includeZeroDuration === true)) {
         entries.push({

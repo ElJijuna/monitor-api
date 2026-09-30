@@ -1323,3 +1323,162 @@ describe('incremental statistics', () => {
     }
   });
 });
+
+test('ReactCollector keeps byComponent when a commit only unmounts components', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Kept() {}
+
+  function Removed() {}
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commit(Kept);
+
+    const { byComponent } = monitor.react.snapshot.value;
+
+    unmount(fiberFor(Removed));
+    commitRoot(fiberFor('div'));
+
+    expect(monitor.react.snapshot.value.entries.map((entry) => entry.type)).toEqual([
+      'mount',
+      'unmount',
+    ]);
+    expect(monitor.react.snapshot.value.byComponent).toBe(byComponent);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector installs a DevTools hook whose other methods React can call', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+
+    const hook = (
+      globalThis.window as unknown as {
+        __REACT_DEVTOOLS_GLOBAL_HOOK__: ReactDevToolsHook & {
+          checkDCE: () => void;
+          inject: () => void;
+          onPostCommitFiberRoot: () => void;
+        };
+      }
+    ).__REACT_DEVTOOLS_GLOBAL_HOOK__;
+
+    // React calls these on load and after each commit; the stub must accept them.
+    expect(() => {
+      hook.checkDCE();
+      hook.inject();
+      hook.onPostCommitFiberRoot();
+    }).not.toThrow();
+  } finally {
+    monitor.destroy();
+  }
+});
+
+/** A root with `count` sibling components, each rendered for 1 ms. */
+function siblings(count: number): TestFiber {
+  const fibers = Array.from({ length: count }, (_, i) => {
+    const Component = { [`C${i}`]: () => {} }[`C${i}`];
+
+    return fiberFor(Component);
+  });
+
+  fibers.forEach((fiber, i) => {
+    fiber.sibling = fibers[i + 1] ?? null;
+  });
+
+  return fibers[0] as TestFiber;
+}
+
+test.each([
+  ['a fractional budget rounds down', 2.9, 2, 1],
+  ['a negative budget visits nothing', -5, 0, 1],
+  ['NaN falls back to the default budget', Number.NaN, 4, 0],
+  ['an undefined budget uses the default', undefined, 4, 0],
+])('ReactCollector maxFiberVisits: %s', (_, maxFiberVisits, recorded, truncated) => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  const monitor = createMonitor({
+    collectors: { react: maxFiberVisits === undefined ? true : { maxFiberVisits } },
+  });
+
+  try {
+    monitor.start();
+    commitRoot(siblings(4));
+
+    expect(monitor.react.snapshot.value.entries).toHaveLength(recorded);
+    expect(monitor.react.snapshot.value.truncatedCommits).toBe(truncated);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector prefers a function component displayName over its name', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function InternalName() {}
+
+  InternalName.displayName = 'Pretty';
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    commit(InternalName);
+
+    expect(monitor.react.snapshot.value.entries[0]?.component).toBe('Pretty');
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector drops unmounts reported before a stop', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  function Gone() {}
+
+  function Shown() {}
+
+  const monitor = createMonitor({ collectors: { react: true } });
+
+  try {
+    monitor.start();
+    unmount(fiberFor(Gone));
+    monitor.stop();
+    monitor.start();
+    commit(Shown);
+
+    expect(monitor.react.snapshot.value.entries.map((entry) => entry.component)).toEqual(['Shown']);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('ReactCollector keeps only the newest pending unmounts within maxHistory', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+
+  const monitor = createMonitor({ maxHistory: 2, collectors: { react: true } });
+
+  try {
+    monitor.start();
+
+    for (const name of ['First', 'Second', 'Third']) {
+      unmount(fiberFor({ [name]: () => {} }[name]));
+    }
+
+    commitRoot(fiberFor('div'));
+
+    expect(monitor.react.snapshot.value.entries.map((entry) => entry.component)).toEqual([
+      'Second',
+      'Third',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
