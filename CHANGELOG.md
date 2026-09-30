@@ -1,3 +1,23 @@
+# [1.9.0](https://github.com/ElJijuna/monitor-api/compare/v1.8.0...v1.9.0) (2026-09-30)
+
+
+### Bug Fixes
+
+* add comprehensive tests for EventCollector's data limits and behavior ([a2bd7aa](https://github.com/ElJijuna/monitor-api/commit/a2bd7aafeecffa305134fce3cd9597e843d7deb5))
+* add tests for ReactCollector's behavior on component unmounts and DevTools hook installation ([4806f3f](https://github.com/ElJijuna/monitor-api/commit/4806f3f21de211bf8d45cec3f2ba64578610277c))
+* add tests to ensure no expiry timer is left behind when stopping from filters or onRequest subscribers ([4632a2f](https://github.com/ElJijuna/monitor-api/commit/4632a2f8edcaceae1d156618946bc62dfa15f220))
+* enhance retry logic in createReporter and add tests for shouldRetry behavior ([dd8ecc2](https://github.com/ElJijuna/monitor-api/commit/dd8ecc2c4b425ac2168c8858b784a9cd2ba1d940))
+* enhance URL classification logic in ResourceCollector and add related tests ([5b270f5](https://github.com/ElJijuna/monitor-api/commit/5b270f53002b20875e34b40fc530befac89cac5a))
+* improve metric recording logic in WebVitalsCollector and add tests for attribution behavior ([e4f9b50](https://github.com/ElJijuna/monitor-api/commit/e4f9b5063a58384ea4c576f91579a3a06ed2beb0))
+* simplify update logic in PerformanceCollector to ensure proper memory reading ([54decf2](https://github.com/ElJijuna/monitor-api/commit/54decf25e8a07480f733bc54cd4e16ce5d7c4e96))
+* update readConnection function to handle null values and improve DeviceCollector's connection update logic ([2f545b1](https://github.com/ElJijuna/monitor-api/commit/2f545b1b1cff299d58500e457fda345eb7f80530))
+
+
+### Features
+
+* enhance DeviceCollector to gather comprehensive device information ([278a659](https://github.com/ElJijuna/monitor-api/commit/278a659a228cf29fd777672ecfa4d596a5c6f095))
+* update DeviceCollector to read screen and viewport sizes once a resize settles, enhance related tests ([fe99d82](https://github.com/ElJijuna/monitor-api/commit/fe99d82179cc3ee33ad9d27fcc1552625b5ce886))
+
 # [1.8.0](https://github.com/ElJijuna/monitor-api/compare/v1.7.1...v1.8.0) (2026-09-29)
 
 

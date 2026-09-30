@@ -1,6 +1,6 @@
 {
     "name": "monitor-api",
-    "version": "1.8.0",
+    "version": "1.9.0",
     "description": "Lightweight, signal-based web app monitoring library. Captures FPS, memory, network, React renders, events, Web Vitals, and optional errors.",
     "author": "ElJijuna <pilmee@gmail.com>",
     "license": "MIT",
