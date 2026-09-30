@@ -407,3 +407,112 @@ test('byLabel matches a full recount after every emit, drop and clear', () => {
     monitor.destroy();
   }
 });
+
+test.each([
+  ['negative', -1],
+  ['fractional', 1.5],
+  ['NaN', Number.NaN],
+])('EventCollector falls back to default limits when they are %s', (_, value) => {
+  const monitor = createMonitor({
+    collectors: { events: { maxLabelLength: value, maxDataDepth: value, maxDataBytes: value } },
+  });
+
+  try {
+    // Defaults: 256-character labels, 5 levels of data, 16 KB of JSON.
+    monitor.events.emit('x'.repeat(256), { a: { b: { c: { d: true } } } });
+    monitor.events.emit('x'.repeat(257));
+    monitor.events.emit('big', { text: 'y'.repeat(16_000) });
+    monitor.events.emit('too big', { text: 'y'.repeat(16_400) });
+
+    expect(
+      monitor.events.snapshot.value.entries.map((entry) => [
+        entry.label.length,
+        entry.data !== null,
+      ]),
+    ).toEqual([
+      [256, true],
+      [3, true],
+      [7, false],
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('EventCollector limits of zero reject every label or every payload', () => {
+  const noLabels = createMonitor({ collectors: { events: { maxLabelLength: 0 } } });
+  const noDepth = createMonitor({ collectors: { events: { maxDataDepth: 0 } } });
+  const noBytes = createMonitor({ collectors: { events: { maxDataBytes: 0 } } });
+
+  try {
+    noLabels.events.emit('a');
+    expect(noLabels.events.snapshot.value.entries).toEqual([]);
+
+    // Even an empty object is one level deep and two bytes of JSON.
+    noDepth.events.emit('depth', {});
+    noBytes.events.emit('bytes', {});
+    expect(noDepth.events.snapshot.value.entries[0]).toMatchObject({ label: 'depth', data: null });
+    expect(noBytes.events.snapshot.value.entries[0]).toMatchObject({ label: 'bytes', data: null });
+  } finally {
+    noLabels.destroy();
+    noDepth.destroy();
+    noBytes.destroy();
+  }
+});
+
+test('EventCollector accepts data exactly at the depth limit, counting arrays as levels', () => {
+  const monitor = createMonitor({ collectors: { events: { maxDataDepth: 3 } } });
+
+  try {
+    monitor.events.emit('fits', { list: [{ id: 1 }] });
+    monitor.events.emit('too deep', { list: [{ tags: [] }] });
+
+    expect(monitor.events.snapshot.value.entries.map((entry) => entry.data)).toEqual([
+      { list: [{ id: 1 }] },
+      null,
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test.each([
+  ['an array', () => [1, 2]],
+  ['a number', () => 42],
+  ['null', () => null],
+  ['undefined', () => undefined],
+])('EventCollector drops data whose toJSON returns %s', (_, toJSON) => {
+  const monitor = createMonitor({ collectors: { events: true } });
+
+  try {
+    monitor.events.emit('custom', { toJSON } as unknown as Record<string, unknown>);
+
+    expect(monitor.events.snapshot.value.entries[0]).toMatchObject({ label: 'custom', data: null });
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('EventCollector ignores window events while stopped but still records direct emits', () => {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+
+  const monitor = createMonitor({ collectors: { events: true } });
+
+  try {
+    monitor.start();
+    emitMonitorEvent('before');
+    monitor.stop();
+    emitMonitorEvent('while stopped');
+    monitor.events.emit('direct');
+    monitor.start();
+    emitMonitorEvent('after');
+
+    expect(monitor.events.snapshot.value.entries.map((entry) => entry.label)).toEqual([
+      'before',
+      'direct',
+      'after',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
+});

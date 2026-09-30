@@ -50,11 +50,8 @@ function isWithinDataDepth(root: object, maxDepth: number): boolean {
   const stack: Array<{ depth: number; value: object }> = [{ depth: 1, value: root }];
 
   while (stack.length > 0) {
-    const current = stack.pop();
-
-    if (!current) {
-      continue;
-    }
+    // The loop condition guarantees an element.
+    const current = stack.pop() as { depth: number; value: object };
 
     if (current.depth > maxDepth) {
       return false;
