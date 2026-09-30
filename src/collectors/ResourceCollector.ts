@@ -112,7 +112,8 @@ function classify(initiatorType: string, url: string): ResourceType {
   }
 
   // `link` and `css` initiators load anything: stylesheets, fonts, preloads, background images.
-  const path = url.split(/[?#]/, 1)[0] ?? '';
+  const end = url.search(/[?#]/);
+  const path = end === -1 ? url : url.slice(0, end);
   const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
 
   return EXTENSION_TYPES[extension] ?? 'other';

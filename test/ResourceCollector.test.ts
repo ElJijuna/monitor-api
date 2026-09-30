@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { ResourceCollector } from '../src/collectors/ResourceCollector';
 import type { ProductionReportRequest } from '../src/index';
 import { createMonitor } from '../src/index';
 
@@ -325,4 +326,56 @@ test('stays inert after destroy', () => {
   monitor.resources.start();
 
   expect(observers).toEqual([]);
+});
+
+test('ResourceCollector created on its own excludes no URL by default', () => {
+  const collector = new ResourceCollector({ maxHistory: 10 });
+
+  collector.start();
+  observers[0]?.deliver([timing('https://app.example.com/metrics.css')]);
+
+  expect(collector.snapshot.value.totals.count).toBe(1);
+
+  collector.destroy();
+});
+
+test.each([
+  ['an uppercase extension', 'https://app.example.com/STYLE.CSS', 'stylesheet'],
+  ['a fragment', 'https://app.example.com/fonts/icons.woff2#iefix', 'font'],
+  ['a query and a fragment', 'https://app.example.com/logo.png?v=2#top', 'image'],
+  ['a query containing a dot', 'https://app.example.com/data?file=report.css', 'other'],
+  ['a dotted directory without an extension', 'https://app.example.com/v1.2/fonts/inter', 'other'],
+  ['an extension on a directory, not the file', 'https://app.example.com/app.js/chunk', 'other'],
+  ['a module script', 'https://app.example.com/entry.mjs', 'script'],
+])('classifies a link resource with %s', (_, url, type) => {
+  const monitor = resourcesMonitor();
+
+  try {
+    monitor.start();
+    observers[0]?.deliver([timing(url)]);
+
+    expect(monitor.resources.snapshot.value.entries[0]?.type).toBe(type);
+  } finally {
+    monitor.destroy();
+  }
+});
+
+test('the initiator decides the type before the URL does', () => {
+  const monitor = resourcesMonitor();
+
+  try {
+    monitor.start();
+    // An image element loading a .js URL is still an image, and a video element loading a .css URL is media.
+    observers[0]?.deliver([
+      timing('https://app.example.com/tracker.js', { initiatorType: 'img' }),
+      timing('https://app.example.com/clip.css', { initiatorType: 'video' }),
+    ]);
+
+    expect(monitor.resources.snapshot.value.entries.map((entry) => entry.type)).toEqual([
+      'image',
+      'media',
+    ]);
+  } finally {
+    monitor.destroy();
+  }
 });
